@@ -3,7 +3,7 @@ import { isAbsolute, relative, resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { fileURLToPath } from 'node:url'
 
-import { QueryEngine } from './QueryEngine.js'
+import { AgentKernel } from './core/agent/index.js'
 import { compactThreadHistory } from './services/compact/index.js'
 import { createTerminalEventHandler } from './services/events/index.js'
 import { createGuiBackendFromMcpConnections, diagnoseGuiBackend, formatGuiDoctorReport } from './services/gui/index.js'
@@ -893,7 +893,7 @@ async function runRepl(args: Extract<ParsedArgs, { kind: 'repl' }>, runtimeProce
 async function createAgentRuntime(
   args: Extract<ParsedArgs, { kind: 'run' | 'repl' }>,
   runtimeProcess: RuntimeProcess,
-): Promise<{ engine: QueryEngine; close(): void }> {
+): Promise<{ engine: AgentKernel; close(): void }> {
   const cwd = runtimeProcess.cwd()
   const sessionId = `local-${Date.now()}`
   const { config } = await loadRuntimeConfig(cwd, args.configPath)
@@ -907,9 +907,10 @@ async function createAgentRuntime(
     },
   })
   const guiBackend = createGuiBackendFromMcpConnections(mcpConnections)
-  const engine = new QueryEngine({
+  const engine = new AgentKernel({
     cwd,
     sessionId,
+    commandSource: 'cli',
     config: effectiveConfig,
     modelOverride: cliModelOverride(args),
     registry,

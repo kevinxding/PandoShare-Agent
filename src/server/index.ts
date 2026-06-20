@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { platform } from 'node:os'
 
-import { QueryEngine } from '../QueryEngine.js'
+import { AgentKernel } from '../core/agent/index.js'
 import {
   LocalApprovalStore,
   storedApprovalToDecision,
@@ -1795,9 +1795,10 @@ async function handleChatRequest(
     return
   }
 
-  const engine = new QueryEngine({
+  const engine = new AgentKernel({
     cwd: runtime.cwd,
     sessionId,
+    commandSource: 'web',
     config: runtime.config,
     registry: runtime.registry,
     threadId,

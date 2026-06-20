@@ -3,7 +3,7 @@ import { appendFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/p
 import { platform } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve } from 'node:path'
 
-import { QueryEngine, type QueryEngineOptions } from '../../QueryEngine.js'
+import { AgentKernel, type AgentKernelOptions } from '../../core/agent/index.js'
 import type { ToolApprovalHandler } from '../../Tool.js'
 import { createDefaultToolRegistry, type ToolRegistry } from '../../tools.js'
 import type { ProjectConfig } from '../config/index.js'
@@ -709,9 +709,10 @@ export class LoopRuntime {
       promptPreview: `loop ${metadata.loopId} iteration ${index}: ${previewText(metadata.objective, 200)}`,
     })
 
-    const engine = new QueryEngine({
+    const engine = new AgentKernel({
       cwd: metadata.cwd,
       sessionId: options.sessionId,
+      commandSource: 'daemon',
       config: options.config,
       registry: options.registry ?? createDefaultToolRegistry(),
       threadId: metadata.threadId,
@@ -721,7 +722,7 @@ export class LoopRuntime {
       requestToolApproval: options.requestToolApproval,
       onEvent: options.onEvent,
       metadata: options.metadata,
-    } satisfies QueryEngineOptions)
+    } satisfies AgentKernelOptions)
     const output = await engine.run(prompt)
     const threadId = engine.threadId()
     const verification = await verifyLoop(metadata, output.finalText, options)

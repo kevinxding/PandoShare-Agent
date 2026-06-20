@@ -4,6 +4,8 @@ declare module 'node:fs/promises' {
   export function writeFile(path: string, data: string, encoding?: 'utf8'): Promise<void>
   export function appendFile(path: string, data: string, encoding?: 'utf8'): Promise<void>
   export function mkdir(path: string, options?: { recursive?: boolean }): Promise<string | undefined>
+  export function rename(oldPath: string, newPath: string): Promise<void>
+  export function unlink(path: string): Promise<void>
   export function readdir(path: string, options?: { withFileTypes?: false }): Promise<string[]>
   export function stat(path: string): Promise<{ isFile(): boolean; isDirectory(): boolean; size: number }>
   export function rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>
