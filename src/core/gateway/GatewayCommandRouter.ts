@@ -51,7 +51,7 @@ export class GatewayCommandRouter {
       case '/threads':
         return this.command(normalized, 'thread.list', { message: normalized }, 'Pando threads requested.')
       case '/replay':
-        return this.command(normalized, 'replay.read', { targetId: rest[0], message: normalized }, 'Pando replay requested.')
+        return this.routeReplay(normalized, rest)
       case '/pair':
         return this.command(normalized, 'gateway.pair', { secret: rest[0], message: normalized }, 'Gateway pairing requested.')
       case '/unpair':
@@ -86,6 +86,17 @@ export class GatewayCommandRouter {
     return this.command(message, 'gateway.command.unknown', { command: '/gui', argumentText: rest.join(' '), message }, 'Unknown GUI command. Try /gui approve <guiActionId> or /gui deny <guiActionId>.', undefined, false)
   }
 
+  private routeReplay(message: NormalizedGatewayMessage, rest: string[]): GatewayCommandRoute {
+    const action = rest[0]?.toLowerCase()
+    if (!action || action === 'help') return this.command(message, 'replay.help', { message }, replayHelpText())
+    if (action === 'run') return this.command(message, 'replay.run', { runId: rest[1], message }, 'Pando run replay requested.')
+    if (action === 'loop') return this.command(message, 'replay.loop', { loopId: rest[1], message }, 'Pando loop replay requested.')
+    if (action === 'gui') return this.command(message, 'replay.gui', { guiActionId: rest[1], message }, 'Pando GUI replay requested.')
+    if (action === 'gateway') return this.command(message, 'replay.gateway', { gatewayId: rest[1], message }, 'Pando gateway replay requested.')
+    if (action === 'model') return this.command(message, 'replay.model', { routeId: rest[1], message }, 'Pando model replay requested.')
+    if (action === 'incidents') return this.command(message, 'replay.incidents', { targetId: rest[1], message }, 'Pando replay incidents requested.')
+    return this.command(message, 'gateway.command.unknown', { command: '/replay', argumentText: rest.join(' '), message }, replayHelpText(), undefined, false)
+  }
   private routeStop(message: NormalizedGatewayMessage, rest: string[], argumentText: string): GatewayCommandRoute {
     const targetId = rest[0]
     if (targetId?.startsWith('loop_')) return this.command(message, 'loop.stop', { loopId: targetId, reason: argumentText, message }, `queued loop.stop`, { loopId: targetId })
@@ -156,7 +167,7 @@ function helpText(): string {
     '/status /health /usage /threads /loops /model status|list|route|set|health|usage|budget',
     '/goal <objective> /resume <loopId> /background <loopId> /pause <loopId> /stop [runId|loopId]',
     '/approve <id> /deny <id> /gui approve <guiActionId> /gui deny <guiActionId>',
-    '/compress <threadId> /replay <runId|loopId> /pair <secret> /unpair',
+    '/compress <threadId> /replay run|loop|gui|gateway|model|incidents <id> /pair <secret> /unpair',
   ].join('\n')
 }
 
@@ -165,4 +176,15 @@ function splitProviderModel(providerOrPair: string | undefined, model: string | 
   const slash = providerOrPair.indexOf('/')
   if (slash === -1) return [providerOrPair, model]
   return [providerOrPair.slice(0, slash), providerOrPair.slice(slash + 1) || model]
+}
+function replayHelpText(): string {
+  return [
+    'Pando replay commands:',
+    '/replay run <runId>',
+    '/replay loop <loopId>',
+    '/replay gui <guiActionId>',
+    '/replay gateway <inboundId|deliveryId>',
+    '/replay model <routeId>',
+    '/replay incidents <runId|loopId>',
+  ].join('\n')
 }

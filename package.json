@@ -80,7 +80,14 @@
     "model:capability-smoke": "npm run build -- --pretty false && node scripts/model-capability-smoke.mjs",
     "model:fallback-smoke": "npm run build -- --pretty false && node scripts/model-fallback-smoke.mjs",
     "model:budget-smoke": "npm run build -- --pretty false && node scripts/model-budget-smoke.mjs",
-    "model:profile-smoke": "npm run build -- --pretty false && node scripts/model-profile-smoke.mjs"
+    "model:profile-smoke": "npm run build -- --pretty false && node scripts/model-profile-smoke.mjs",
+    "replay:run-smoke": "npm run build -- --pretty false && node scripts/replay-run-smoke.mjs",
+    "replay:loop-smoke": "npm run build -- --pretty false && node scripts/replay-loop-smoke.mjs",
+    "replay:cross-core-smoke": "npm run build -- --pretty false && node scripts/replay-cross-core-smoke.mjs",
+    "replay:incident-smoke": "npm run build -- --pretty false && node scripts/replay-incident-smoke.mjs",
+    "replay:export-smoke": "npm run build -- --pretty false && node scripts/replay-export-smoke.mjs",
+    "replay:api-smoke": "npm run build -- --pretty false && node scripts/replay-api-smoke.mjs",
+    "replay:cli-smoke": "npm run build -- --pretty false && node scripts/replay-cli-smoke.mjs"
   },
   "engines": {
     "node": ">=18.0.0"

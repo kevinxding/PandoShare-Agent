@@ -258,3 +258,32 @@ Validation commands:
 Remaining non-blocking work:
 
 - Real provider probes, Web UI picker, provider-specific pricing/tokenization, and benchmark history.
+## Event Replay V2
+
+Implemented:
+
+- ReplayService public API for reports, markdown, JSON, bundles, incidents, graph, and operator summary.
+- ReplayQuery model with scoped run/thread/loop/goal/gui/gateway/model/checkpoint/range/workspace queries and bounded workspace rules.
+- ReplayEventReader that reads only through DurableRuntime APIs.
+- Causal graph across gateway, command, loop, run, model, tool, GUI, checkpoint, approval, recovery, and legacy nodes.
+- Cross-core projections for Run, Thread, Loop, GUI, Gateway, Model, Tool, Checkpoint, Recovery, and Approval.
+- Incident detector covering the required taxonomy, plus stable incident ids and secret-safe reporting.
+- Operator recommendations for error and critical incidents.
+- ReplayReport V2 markdown/json/bundle output.
+- Artifact manifest and strict redaction engine.
+- CLI `pando replay ...`, server `/api/replay/...`, and Gateway `/replay ...` command routing.
+- Seven replay smoke scripts.
+
+Validation commands:
+
+- `npm run replay:run-smoke`
+- `npm run replay:loop-smoke`
+- `npm run replay:cross-core-smoke`
+- `npm run replay:incident-smoke`
+- `npm run replay:export-smoke`
+- `npm run replay:api-smoke`
+- `npm run replay:cli-smoke`
+
+Remaining non-blocking work:
+
+- Web Mission Control UI, real-time replay stream, visual graph UI, remote artifact browser, golden trace library, and training trajectory export.

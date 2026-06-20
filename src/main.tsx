@@ -4,6 +4,8 @@ import { createInterface } from 'node:readline/promises'
 import { fileURLToPath } from 'node:url'
 
 import { AgentKernel } from './core/agent/index.js'
+import { DurableRuntime } from './core/durable/index.js'
+import { ReplayService, type ReplayQuery } from './core/replay/index.js'
 import { compactThreadHistory } from './services/compact/index.js'
 import { createTerminalEventHandler } from './services/events/index.js'
 import { createGuiBackendFromMcpConnections, diagnoseGuiBackend, formatGuiDoctorReport } from './services/gui/index.js'
@@ -106,6 +108,11 @@ export async function main(argv = getRuntimeProcess().argv.slice(2)): Promise<vo
 
   if (args.kind === 'serve') {
     await runServeCommand(args, runtimeProcess)
+    return
+  }
+
+  if (args.kind === 'replay') {
+    await runReplayCommand(args, runtimeProcess)
     return
   }
 
@@ -235,8 +242,23 @@ type LoopCommandArgs =
       out?: string
     }
 
-type GatewayCommandArgs =
-  | {
+type ReplayCommandArgs = {
+  kind: 'replay'
+  command: 'run' | 'thread' | 'loop' | 'gui' | 'gateway' | 'model' | 'range' | 'export' | 'incidents' | 'graph'
+  id?: string
+  runId?: string
+  threadId?: string
+  loopId?: string
+  guiActionId?: string
+  gatewayId?: string
+  routeId?: string
+  fromSeq?: number
+  toSeq?: number
+  out?: string
+  json: boolean
+}
+
+type GatewayCommandArgs =  | {
       kind: 'gateway'
       command: 'doctor'
       configPath?: string
@@ -333,6 +355,7 @@ type ParsedArgs =
   | ThreadCommandArgs
   | LoopCommandArgs
   | GatewayCommandArgs
+  | ReplayCommandArgs
 
 function parseArgs(argv: readonly string[]): ParsedArgs {
   if (argv[0] === 'doctor') return parseDoctorCommand(argv.slice(1))
@@ -343,6 +366,7 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
   if (argv[0] === 'thread') return parseThreadCommand(argv.slice(1))
   if (argv[0] === 'loop') return parseLoopCommand(argv.slice(1))
   if (argv[0] === 'serve') return parseServeCommand(argv.slice(1))
+  if (argv[0] === 'replay') return parseReplayCommand(argv.slice(1))
   if (argv[0] === 'exec') return parseRunArgs(argv.slice(1), 'exec')
   return parseRunArgs(argv, 'direct')
 }
@@ -619,6 +643,43 @@ function parseGoalExport(argv: readonly string[]): GoalCommandArgs {
   }
 }
 
+function parseReplayCommand(argv: readonly string[]): ReplayCommandArgs {
+  const command = argv[0]
+  if (!command) throw new Error('replay requires a command')
+  const json = argv.includes('--json')
+  const outIndex = argv.indexOf('--out')
+  const out = outIndex >= 0 ? requiredArg(argv[outIndex + 1], '--out requires a path') : undefined
+  const fromSeqIndex = argv.indexOf('--from-seq')
+  const toSeqIndex = argv.indexOf('--to-seq')
+  const fromSeq = fromSeqIndex >= 0 ? parsePositiveInteger(requiredArg(argv[fromSeqIndex + 1], '--from-seq requires a number'), '--from-seq') : undefined
+  const toSeq = toSeqIndex >= 0 ? parsePositiveInteger(requiredArg(argv[toSeqIndex + 1], '--to-seq requires a number'), '--to-seq') : undefined
+  const positional = argv.slice(1).filter((arg, index, all) => {
+    if (arg === '--json') return false
+    if (arg === '--out' || arg === '--from-seq' || arg === '--to-seq') return false
+    const previous = all[index - 1]
+    if (previous === '--out' || previous === '--from-seq' || previous === '--to-seq') return false
+    return !arg.startsWith('--')
+  })
+  switch (command) {
+    case 'run': return { kind: 'replay', command, runId: requiredArg(positional[0], 'replay run requires a run id'), json }
+    case 'thread': return { kind: 'replay', command, threadId: requiredArg(positional[0], 'replay thread requires a thread id'), json }
+    case 'loop': return { kind: 'replay', command, loopId: requiredArg(positional[0], 'replay loop requires a loop id'), json }
+    case 'gui': return { kind: 'replay', command, guiActionId: requiredArg(positional[0], 'replay gui requires a gui action id'), json }
+    case 'gateway': return { kind: 'replay', command, gatewayId: requiredArg(positional[0], 'replay gateway requires an inbound or delivery id'), json }
+    case 'model': return { kind: 'replay', command, routeId: requiredArg(positional[0], 'replay model requires a route id'), json }
+    case 'range': return { kind: 'replay', command, fromSeq, toSeq, json }
+    case 'export': {
+      let runId: string | undefined
+      const runIndex = argv.indexOf('--run')
+      if (runIndex >= 0) runId = requiredArg(argv[runIndex + 1], '--run requires a run id')
+      return { kind: 'replay', command, runId: runId ?? positional[0], out, json }
+    }
+    case 'incidents': return { kind: 'replay', command, runId: positional[0], loopId: argv.includes('--loop') ? requiredArg(argv[argv.indexOf('--loop') + 1], '--loop requires a loop id') : undefined, json }
+    case 'graph': return { kind: 'replay', command, runId: positional[0], json }
+    default:
+      throw new Error(`Unknown replay command: ${command}`)
+  }
+}
 function parseGatewayCommand(argv: readonly string[]): GatewayCommandArgs {
   const command = argv[0]
   if (command === 'doctor') {
@@ -1604,6 +1665,49 @@ async function runGoalCommand(args: GoalCommandArgs, runtimeProcess: RuntimeProc
   }
 }
 
+async function runReplayCommand(args: ReplayCommandArgs, runtimeProcess: RuntimeProcess): Promise<void> {
+  const workspaceRoot = runtimeProcess.cwd()
+  const service = new ReplayService(new DurableRuntime({ workspaceRoot, workspaceId: 'default' }))
+  const query = replayQueryFromArgs(args)
+  if (args.command === 'export') {
+    const out = resolveWorkspaceOutputPath(workspaceRoot, args.out ?? `.pandoshare/replay/export-${args.runId ?? Date.now()}`)
+    const result = await service.exportBundle(query, out)
+    runtimeProcess.stdout.write(args.json ? `${JSON.stringify(result, null, 2)}\n` : `Replay bundle exported: ${result.outputDir}\n`)
+    return
+  }
+  if (args.command === 'incidents') {
+    const incidents = await service.detectIncidents(query)
+    runtimeProcess.stdout.write(args.json ? `${JSON.stringify({ ok: true, incidents }, null, 2)}\n` : formatIncidentSummary(incidents))
+    return
+  }
+  if (args.command === 'graph') {
+    const graph = await service.buildGraph(query)
+    runtimeProcess.stdout.write(args.json ? `${JSON.stringify(graph, null, 2)}\n` : `Replay graph: nodes=${graph.nodes.length} edges=${graph.edges.length} orphans=${graph.orphanNodes.length}\n`)
+    return
+  }
+  if (args.json) runtimeProcess.stdout.write(`${JSON.stringify(await service.buildJson(query), null, 2)}\n`)
+  else runtimeProcess.stdout.write(await service.buildMarkdown(query))
+}
+
+function replayQueryFromArgs(args: ReplayCommandArgs): Partial<ReplayQuery> {
+  switch (args.command) {
+    case 'run': return { workspaceId: 'default', scope: 'run', runId: args.runId }
+    case 'thread': return { workspaceId: 'default', scope: 'thread', threadId: args.threadId }
+    case 'loop': return { workspaceId: 'default', scope: 'loop', loopId: args.loopId }
+    case 'gui': return { workspaceId: 'default', scope: 'gui_action', guiActionId: args.guiActionId }
+    case 'gateway': return { workspaceId: 'default', scope: 'gateway_inbound', inboundId: args.gatewayId, deliveryId: args.gatewayId }
+    case 'model': return { workspaceId: 'default', scope: 'model_route', routeId: args.routeId }
+    case 'range': return { workspaceId: 'default', scope: 'time_range', fromSeq: args.fromSeq, toSeq: args.toSeq }
+    case 'export': return { workspaceId: 'default', scope: 'run', runId: args.runId }
+    case 'incidents': return args.loopId ? { workspaceId: 'default', scope: 'loop', loopId: args.loopId } : { workspaceId: 'default', scope: 'run', runId: args.runId }
+    case 'graph': return { workspaceId: 'default', scope: 'run', runId: args.runId }
+  }
+}
+
+function formatIncidentSummary(incidents: readonly { severity: string; kind: string; title: string }[]): string {
+  if (!incidents.length) return 'No replay incidents found.\n'
+  return `${incidents.map(incident => `- [${incident.severity}] ${incident.kind}: ${incident.title}`).join('\n')}\n`
+}
 async function runLoopCommand(args: LoopCommandArgs, runtimeProcess: RuntimeProcess): Promise<void> {
   const workspaceRoot = runtimeProcess.cwd()
   const store = new LocalLoopStore(workspaceRoot)

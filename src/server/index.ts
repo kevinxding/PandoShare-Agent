@@ -6,6 +6,8 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { platform } from 'node:os'
 
 import { AgentKernel } from '../core/agent/index.js'
+import { DurableRuntime } from '../core/durable/index.js'
+import { ReplayService, type ReplayQuery } from '../core/replay/index.js'
 import { GatewayDaemon } from '../core/gateway/index.js'
 import {
   LocalApprovalStore,
@@ -194,6 +196,57 @@ async function handleApiRequest(
   url: URL,
 ): Promise<void> {
   const method = request.method ?? 'GET'
+
+  const replayRunMatch = url.pathname.match(/^\/api\/replay\/run\/([A-Za-z0-9_-]+)$/)
+  if (method === 'GET' && replayRunMatch) {
+    await handleReplayRequest(response, runtime, url, { workspaceId: 'default', scope: 'run', runId: replayRunMatch[1]! })
+    return
+  }
+
+  const replayThreadMatch = url.pathname.match(/^\/api\/replay\/thread\/([A-Za-z0-9_-]+)$/)
+  if (method === 'GET' && replayThreadMatch) {
+    await handleReplayRequest(response, runtime, url, { workspaceId: 'default', scope: 'thread', threadId: replayThreadMatch[1]! })
+    return
+  }
+
+  const replayLoopMatch = url.pathname.match(/^\/api\/replay\/loop\/([A-Za-z0-9_-]+)$/)
+  if (method === 'GET' && replayLoopMatch) {
+    await handleReplayRequest(response, runtime, url, { workspaceId: 'default', scope: 'loop', loopId: replayLoopMatch[1]! })
+    return
+  }
+
+  const replayGuiMatch = url.pathname.match(/^\/api\/replay\/gui\/([A-Za-z0-9_-]+)$/)
+  if (method === 'GET' && replayGuiMatch) {
+    await handleReplayRequest(response, runtime, url, { workspaceId: 'default', scope: 'gui_action', guiActionId: replayGuiMatch[1]! })
+    return
+  }
+
+  const replayGatewayMatch = url.pathname.match(/^\/api\/replay\/gateway\/([A-Za-z0-9_-]+)$/)
+  if (method === 'GET' && replayGatewayMatch) {
+    const id = replayGatewayMatch[1]!
+    await handleReplayRequest(response, runtime, url, id.startsWith('delivery_') ? { workspaceId: 'default', scope: 'gateway_delivery', deliveryId: id } : { workspaceId: 'default', scope: 'gateway_inbound', inboundId: id })
+    return
+  }
+
+  const replayModelMatch = url.pathname.match(/^\/api\/replay\/model\/([A-Za-z0-9_-]+)$/)
+  if (method === 'GET' && replayModelMatch) {
+    await handleReplayRequest(response, runtime, url, { workspaceId: 'default', scope: 'model_route', routeId: replayModelMatch[1]! })
+    return
+  }
+
+  if (method === 'GET' && url.pathname === '/api/replay/incidents') {
+    const runId = url.searchParams.get('runId') ?? undefined
+    const loopId = url.searchParams.get('loopId') ?? undefined
+    const query: Partial<ReplayQuery> = loopId ? { workspaceId: 'default', scope: 'loop', loopId } : { workspaceId: 'default', scope: 'run', runId }
+    const service = new ReplayService(new DurableRuntime({ workspaceRoot: runtime.cwd, workspaceId: 'default' }))
+    sendJson(response, 200, { ok: true, incidents: await service.detectIncidents(query) })
+    return
+  }
+
+  if (method === 'POST' && url.pathname === '/api/replay/export') {
+    await handleReplayExportRequest(request, response, runtime)
+    return
+  }
   if (method === 'GET' && url.pathname === '/api/doctor') {
     sendJson(response, 200, await runPreflight({ cwd: runtime.cwd, configPath: runtime.configPath }))
     return
@@ -466,6 +519,49 @@ async function handleApiRequest(
   sendJson(response, 404, { ok: false, error: `Unknown API route: ${method} ${url.pathname}` })
 }
 
+async function handleReplayRequest(
+  response: ServerResponse,
+  runtime: ServerRuntime,
+  url: URL,
+  query: Partial<ReplayQuery>,
+): Promise<void> {
+  try {
+    const service = new ReplayService(new DurableRuntime({ workspaceRoot: runtime.cwd, workspaceId: 'default' }))
+    if (url.searchParams.get('format') === 'markdown') {
+      sendText(response, 200, await service.buildMarkdown({ ...query, redaction: 'strict' }), 'text/markdown; charset=utf-8')
+      return
+    }
+    sendJson(response, 200, { ok: true, report: await service.buildJson({ ...query, redaction: 'strict' }) })
+  } catch (error) {
+    sendJson(response, 400, { ok: false, error: errorMessage(error) })
+  }
+}
+
+async function handleReplayExportRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  runtime: ServerRuntime,
+): Promise<void> {
+  try {
+    const body = await readJsonBody(request)
+    const runId = typeof body.runId === 'string' ? body.runId : undefined
+    const loopId = typeof body.loopId === 'string' ? body.loopId : undefined
+    const out = typeof body.out === 'string' && body.out.trim() ? body.out.trim() : `.pandoshare/replay/export-${runId ?? loopId ?? Date.now()}`
+    const outputDir = resolveReplayOutputPath(runtime.cwd, out)
+    const query: Partial<ReplayQuery> = loopId ? { workspaceId: 'default', scope: 'loop', loopId } : { workspaceId: 'default', scope: 'run', runId }
+    const service = new ReplayService(new DurableRuntime({ workspaceRoot: runtime.cwd, workspaceId: 'default' }))
+    sendJson(response, 200, { ok: true, export: await service.exportBundle(query, outputDir) })
+  } catch (error) {
+    sendJson(response, 400, { ok: false, error: errorMessage(error) })
+  }
+}
+function resolveReplayOutputPath(workspaceRoot: string, outputPath: string): string {
+  const workspace = resolve(workspaceRoot)
+  const target = resolve(workspace, outputPath)
+  const relativePath = relative(workspace, target)
+  if (relativePath === '' || relativePath.startsWith('..')) throw new Error('replay export path must stay inside the workspace')
+  return target
+}
 async function buildSettingsResponse(runtime: ServerRuntime): Promise<Record<string, unknown>> {
   return {
     ok: true,

@@ -129,3 +129,13 @@ New core code should not import Web, CLI, or server modules.
 - Model Router must not store API keys, access tokens, raw auth headers, or secret-bearing provider payloads.
 - Gateway, Loop, GUI, and Agent Kernel may ask Model Router for decisions, but they must not duplicate provider scoring logic.
 - Missing auth is a diagnostic state, not a secret value; only env key names may appear in safe summaries.
+## Event Replay V2 Boundaries
+
+- Replay must not execute tools.
+- Replay must not call models in this phase. A future explicit `replay_audit` task may call a model through ModelRouter, but it is out of scope here.
+- Replay must not operate GUI.
+- Replay must not dispatch gateway outbound messages.
+- Replay must not mutate durable history, checkpoints, run ledger, loop state, GUI records, gateway queues, or model state.
+- Replay may only read DurableRuntime, projection caches, checkpoints, recovery decisions, audits, and safe artifact refs.
+- Replay output must be redacted by default.
+- Replay recommendations are advisory only and must not execute recovery or approvals.

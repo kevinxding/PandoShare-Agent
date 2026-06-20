@@ -168,3 +168,22 @@ Next migration round:
 3. Provider-specific tokenizers and price tables.
 4. Loop task scheduler integration with automatic profile selection.
 5. Multi-tenant budget scopes if the project moves beyond local single-user operation.
+## Event Replay V2 Update
+
+Implemented in this pass:
+
+- Added ReplayService as the new replay public API.
+- Added ReplayQuery, ReplayEventReader, ReplayCausalGraph, cross-core projectors, incident detector, recommendations, redactor, artifact manifest, diff, validator, and ReplayReport V2.
+- Added CLI `pando replay ...` commands.
+- Added server replay APIs.
+- Added Gateway `/replay ...` command routing through dispatcher callbacks.
+- Added seven replay smoke scripts for run, loop, cross-core, incident, export, API, and CLI coverage.
+
+Next migration round:
+
+1. Web Mission Control should consume ReplayService data.
+2. Stability runner should emit replay bundles on failure.
+3. ThreadStore should bridge canonical EventEnvelope records more deeply.
+4. ToolRuntime should add typed event payloads for richer tool projections.
+5. Context, memory, and compaction should get dedicated replay sections.
+6. Real-time replay stream should wait until Web UI exists.

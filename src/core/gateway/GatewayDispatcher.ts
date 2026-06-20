@@ -29,7 +29,7 @@ export type GatewayDispatcherInput = {
   healthProvider?: () => unknown | Promise<unknown>
   usageProvider?: () => unknown | Promise<unknown>
   threadProvider?: () => unknown | Promise<unknown>
-  replayProvider?: (targetId: string) => unknown | Promise<unknown>
+  replayProvider?: (input: { action?: string; targetId?: string; runId?: string; loopId?: string; guiActionId?: string; gatewayId?: string; routeId?: string }) => unknown | Promise<unknown>
   compactProvider?: (threadId: string) => unknown | Promise<unknown>
   backgroundEnroll?: (loopId: string) => unknown | Promise<unknown>
   modelProvider?: (input: { action?: string; provider?: string; model?: string; profileId?: string; taskType?: string }) => unknown | Promise<unknown>
@@ -75,9 +75,18 @@ export class GatewayDispatcher {
     if (command.commandType === 'gateway.health') return this.result(command, formatResult('Pando gateway health', await this.input.healthProvider?.()))
     if (command.commandType === 'gateway.usage') return this.result(command, formatResult('Pando gateway usage', await this.input.usageProvider?.()))
     if (command.commandType === 'thread.list') return this.result(command, formatResult('Pando threads', await this.input.threadProvider?.()))
-    if (command.commandType === 'replay.read') {
-      const targetId = stringPayload(command.payload, 'targetId') ?? ''
-      return this.result(command, formatResult('Pando replay', await this.input.replayProvider?.(targetId)))
+        if (command.commandType.startsWith('replay.')) {
+      const action = command.commandType.slice('replay.'.length)
+      if (action === 'help') return this.result(command, route.replyText ?? 'Pando replay help')
+      return this.result(command, formatResult('Pando replay', await this.input.replayProvider?.({
+        action,
+        targetId: stringPayload(command.payload, 'targetId'),
+        runId: stringPayload(command.payload, 'runId'),
+        loopId: stringPayload(command.payload, 'loopId'),
+        guiActionId: stringPayload(command.payload, 'guiActionId'),
+        gatewayId: stringPayload(command.payload, 'gatewayId'),
+        routeId: stringPayload(command.payload, 'routeId'),
+      })))
     }
     if (command.commandType === 'thread.compact') {
       const threadId = stringPayload(command.payload, 'threadId') ?? ''
