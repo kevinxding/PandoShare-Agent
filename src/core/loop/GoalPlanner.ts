@@ -1,3 +1,4 @@
+import { createGoalId, createPlanId, createTaskId } from './LoopIdentity.js'
 import type { Goal, Plan, Task } from './LoopTypes.js'
 
 export class GoalPlanner {
@@ -9,19 +10,21 @@ export class GoalPlanner {
   }): Goal {
     const objective = input.objective.trim()
     if (!objective) throw new Error('Goal objective must not be empty')
+    const createdAtMs = Date.now()
     return {
-      goalId: input.goalId ?? `goal_${Date.now()}_${shortId()}`,
+      goalId: input.goalId ?? createGoalId(createdAtMs),
       objective,
       successCriteria: input.successCriteria ?? [],
       constraints: input.constraints ?? [],
       status: 'created',
-      createdAtMs: Date.now(),
+      createdAtMs,
     }
   }
 
   createPlan(goal: Goal): Plan {
+    const createdAtMs = Date.now()
     const task: Task = {
-      taskId: `task_${Date.now()}_${shortId()}`,
+      taskId: createTaskId(createdAtMs),
       goalId: goal.goalId,
       title: firstLine(goal.objective),
       status: 'queued',
@@ -33,18 +36,14 @@ export class GoalPlanner {
       requiresApproval: false,
     }
     return {
-      planId: `plan_${Date.now()}_${shortId()}`,
+      planId: createPlanId(createdAtMs),
       goalId: goal.goalId,
       tasks: [task],
-      createdAtMs: Date.now(),
+      createdAtMs,
     }
   }
 }
 
 function firstLine(value: string): string {
   return value.split(/\r?\n/)[0]?.trim().slice(0, 100) || 'Loop task'
-}
-
-function shortId(): string {
-  return Math.random().toString(36).slice(2, 10)
 }

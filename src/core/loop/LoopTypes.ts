@@ -1,6 +1,6 @@
 import type { CommandEnvelope } from '../protocol/index.js'
 
-export type GoalStatus = 'created' | 'planned' | 'running' | 'completed' | 'failed' | 'blocked'
+export type GoalStatus = 'created' | 'planned' | 'running' | 'completed' | 'failed' | 'blocked' | 'interrupted'
 
 export type TaskStatus = 'created' | 'queued' | 'running' | 'completed' | 'failed' | 'blocked'
 
@@ -13,6 +13,7 @@ export type LoopVerifierSpec =
       type: 'command'
       command: string
       cwd?: string
+      timeoutMs?: number
     }
   | {
       type: 'file'
@@ -66,6 +67,8 @@ export type VerificationResult = {
   ok: boolean
   verifierType: LoopVerifierSpec['type']
   message: string
+  reason?: string
+  metadata?: Record<string, unknown>
 }
 
 export type HumanGateRequest = {
@@ -73,6 +76,8 @@ export type HumanGateRequest = {
   goalId: string
   taskId: string
   reason: string
+  risk?: string
+  requestedAction: string
   command: CommandEnvelope
   createdAtMs: number
 }

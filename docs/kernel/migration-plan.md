@@ -1,4 +1,4 @@
-﻿# Kernel Migration Plan
+# Kernel Migration Plan
 
 ## Existing Module Mapping
 
@@ -97,3 +97,15 @@ Next work:
 - `AgentKernelAdapter` is intentionally thin and should not grow state ownership.
 - Resume is still adapter-level thread initialization, not a dedicated core resume engine.
 - Durable Runtime V1 is not full event sourcing; it is a recovery contract layer.
+
+## Loop Runtime V2 Control Plane Update
+
+Loop Runtime V2 is now the core control-plane direction. The next migration round should move surrounding systems onto this durable contract in this order:
+
+1. GUI Runtime V2: expose GUI work as AgentKernel/tool activity, not direct LoopRuntime backend calls.
+2. Gateway Daemon V2: convert bot and heartbeat triggers into loop commands and durable human-gate approvals.
+3. Model Router V2: keep provider selection outside LoopRuntime while making run metadata visible through durable events.
+4. Event Replay V2: make loop replay the primary debugging view for long-running goals.
+5. Legacy service loopRuntime consolidation: keep `src/services/loopRuntime` working while bridging legacy events, then gradually move durable control state into `src/core/loop`.
+
+The legacy loop runtime remains the mature execution loop for workspace isolation, GUI tool loop smoke, failure policies, manual intervention, token policy, and CLI export. It must not be deleted until those features have durable V2 equivalents.

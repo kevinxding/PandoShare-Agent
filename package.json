@@ -1,4 +1,4 @@
-﻿{
+{
   "name": "pandoshare-agent",
   "version": "0.1.0",
   "private": true,
@@ -64,7 +64,10 @@
     "approval-web:smoke": "npm run build -- --pretty false && npm run web:build && node scripts/approval-web-smoke.mjs",
     "stability:smoke": "npm run build -- --pretty false && npm run web:build && node scripts/stability-runner.mjs --label smoke --duration-ms 2500 --monitor-interval-ms 250 --heartbeat-interval-ms 100",
     "stability:1h": "npm run build -- --pretty false && npm run web:build && node scripts/stability-runner.mjs --label 1h --duration-ms 3600000 --monitor-interval-ms 30000 --heartbeat-interval-ms 5000 --keep-workspace",
-    "stability:10h": "npm run build -- --pretty false && npm run web:build && node scripts/stability-runner.mjs --label 10h --duration-ms 36000000 --monitor-interval-ms 60000 --heartbeat-interval-ms 10000 --keep-workspace"
+    "stability:10h": "npm run build -- --pretty false && npm run web:build && node scripts/stability-runner.mjs --label 10h --duration-ms 36000000 --monitor-interval-ms 60000 --heartbeat-interval-ms 10000 --keep-workspace",
+    "loop:core-smoke": "npm run build -- --pretty false && node scripts/core-loop-smoke.mjs",
+    "loop:projection-smoke": "npm run build -- --pretty false && node scripts/loop-projection-smoke.mjs",
+    "loop:recovery-smoke": "npm run build -- --pretty false && node scripts/loop-recovery-smoke.mjs"
   },
   "engines": {
     "node": ">=18.0.0"

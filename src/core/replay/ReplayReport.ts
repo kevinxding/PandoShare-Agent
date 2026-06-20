@@ -1,5 +1,6 @@
 import type { ReplayTimelineItem } from './EventReplay.js'
 import type { ConsistencyAuditResult, KernelCheckpoint, RecoveryDecision } from '../durable/index.js'
+import type { LoopState } from '../loop/index.js'
 
 export class ReplayReport {
   toMarkdown(input: {
@@ -10,7 +11,9 @@ export class ReplayReport {
     checkpoints?: readonly KernelCheckpoint[]
     recoveryDecision?: RecoveryDecision
     audit?: ConsistencyAuditResult
+    loopState?: LoopState
   }): string {
+    const inferredLoopState = input.loopState
     const lines = [
       `# ${input.title ?? 'Pando Run Replay'}`,
       '',
@@ -18,6 +21,22 @@ export class ReplayReport {
       ...(input.status ? [`Status: ${input.status}`, ''] : []),
       `Total events: ${input.timeline.length}`,
       '',
+      ...(inferredLoopState ? [
+        '## Loop Projection',
+        '',
+        `Loop: ${inferredLoopState.loopId}`,
+        `Goal: ${inferredLoopState.goalId}`,
+        `Status: ${inferredLoopState.status}`,
+        `Tasks: ${inferredLoopState.tasks.length}`,
+        `Attempts: ${inferredLoopState.attempts.length}`,
+        `Pending human gate: ${inferredLoopState.pendingHumanGateId ?? 'none'}`,
+        `Verification: ${inferredLoopState.verificationSummary ?? 'none'}`,
+        `Recovery decision: ${inferredLoopState.recoveryDecision ?? 'none'}`,
+        ...(inferredLoopState.tasks.length ? ['', ...inferredLoopState.tasks.map(task => `- task ${task.taskId}: ${task.status} (${task.title})`)] : []),
+        ...(inferredLoopState.attempts.length ? ['', ...inferredLoopState.attempts.map(attempt => `- attempt ${attempt.attemptId}: ${attempt.status}${attempt.runId ? ` run=${attempt.runId}` : ''}`)] : []),
+        ...(inferredLoopState.warnings.length ? ['', ...inferredLoopState.warnings.map(warning => `- warning: ${warning}`)] : []),
+        '',
+      ] : []),
       ...(input.recoveryDecision ? [
         '## Recovery',
         '',

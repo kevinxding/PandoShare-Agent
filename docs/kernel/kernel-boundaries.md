@@ -1,4 +1,4 @@
-﻿# Kernel Boundaries
+# Kernel Boundaries
 
 ## Allowed Direction
 
@@ -88,3 +88,14 @@ New core code should not import Web, CLI, or server modules.
 - New core code should use DurableRuntime for run ledger reads/writes.
 - Seq repair is maintenance-only and must not run silently in business paths.
 - SideEffectClassifier decides recovery safety boundaries; it does not approve or execute actions.
+
+## Loop Runtime V2 Boundaries
+
+- `LoopRuntime` must not call `QueryEngine` directly.
+- `LoopRuntime` must not directly operate tools, GUI backends, gateway adapters, or raw MCP backends.
+- Loop truth state comes from `DurableRuntime` events and checkpoints.
+- `TaskQueue` is not truth. It may only be used as a transient scheduling helper.
+- `LoopStateStore` is a projection cache and must never become a second state source.
+- Legacy `LocalLoopStore` is a migration object, not core truth.
+- `runNext` may execute at most one task attempt.
+- Unsafe external effects must not be automatically replayed by recovery.

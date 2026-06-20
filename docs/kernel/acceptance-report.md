@@ -1,4 +1,4 @@
-﻿# Kernel Acceptance Report
+# Kernel Acceptance Report
 
 Status: verified for Durable Runtime V1.1 hardening.
 
@@ -71,3 +71,44 @@ Full regression is run before final handoff and recorded in the final response.
 - Add typed tool-event bridge payloads.
 - Add health dashboard views from `createMaintenanceReport()`.
 - Add operator workflows for `requires_human` and `mark_corrupted` decisions.
+
+## Loop Runtime V2 Acceptance Update
+
+Implemented in this pass:
+
+- Added Loop Event Contract V2 constants and exports.
+- Added centralized Loop identity helpers.
+- Added pure `LoopProjector` and projection cache `LoopStateStore`.
+- Added `LoopScheduler`, `LoopCommandHandler`, `LoopRecovery`, and `LoopLegacyAdapter`.
+- Refactored core `LoopRuntime` to provide `createLoop`, `runNext`, `resumeLoop`, `status`, and `recoverLoop`.
+- Kept `runGoal` as a compatibility API through `createLoop + runNext`.
+- Eventized `HumanGate`, `LoopVerifier`, and `AttemptRunner`.
+- Added loop projection support to replay reports.
+- Added `loop:core-smoke`, `loop:projection-smoke`, and `loop:recovery-smoke` scripts.
+
+Verification run during implementation:
+
+- `npm run typecheck` passed.
+- `npm run loop:core-smoke` passed.
+- `npm run loop:projection-smoke` passed.
+- `npm run loop:recovery-smoke` passed.
+- `npm run kernel:smoke` passed.
+- `npm run durable:smoke` passed.
+- `npm run loop-runtime:smoke` passed.
+
+Remaining verification before release: run the full requested gate set including `npm run check`, `durable:hardening-smoke`, `gateway:smoke`, `gui-tool:smoke`, and `model-smoke`.
+
+Final verification for this Loop Runtime V2 pass:
+
+- `npm run typecheck` passed.
+- `npm run check` passed.
+- `npm run kernel:smoke` passed.
+- `npm run durable:smoke` passed.
+- `npm run durable:hardening-smoke` passed.
+- `npm run loop:core-smoke` passed.
+- `npm run loop:projection-smoke` passed.
+- `npm run loop:recovery-smoke` passed.
+- `npm run loop-runtime:smoke` passed.
+- `npm run gateway:smoke` passed.
+- `npm run gui-tool:smoke` passed.
+- `npm run model-smoke` passed.
