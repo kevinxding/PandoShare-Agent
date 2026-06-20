@@ -5,13 +5,13 @@
 | Current module | Target kernel | Migration path |
 |---|---|---|
 | `src/QueryEngine.ts` | Agent Kernel | Keep as legacy executor. It should only be directly constructed by `src/core/agent/AgentKernelAdapter.ts` in runtime code. |
-| `src/services/threadStore` | Durable Runtime | Keep existing thread format. Migrate its JSON/JSONL helpers onto core store primitives. |
-| `src/services/events` | Protocol / Event Replay | Keep `AgentEvent`. Bridge through `AgentKernelEventBridge` into canonical `EventEnvelope` records. |
-| `src/services/permissions` | Protocol / Agent Kernel | Keep terminal/web approvals. Represent new human gates as approval commands/events. |
-| `src/services/contextBuilder` | Agent Kernel | Keep inside QueryEngine for now. Continue surfacing context events through the legacy bridge. |
-| `src/services/compact` | Durable Runtime / Agent Kernel | Keep current compaction implementation. Treat compaction summaries as checkpoint-like durable state. |
-| `src/services/llm` | Model Router | Keep provider definitions and route selection in `ModelRouter`; do not change provider choice inside Agent Kernel. |
-| `src/services/loopRuntime` | Loop Runtime | Keep full legacy loop implementation. Core loop attempts must enter Agent work through `AgentKernel.submitRun`. |
+| `src/services/threadStore` | Durable Runtime | Keep existing thread format. Migrate metadata/messages/events/checkpoints onto core store primitives over time. |
+| `src/services/events` | Protocol / Event Replay | Keep `AgentEvent`. Bridge through `AgentKernelEventBridge` into canonical durable events. |
+| `src/services/permissions` | Protocol / Agent Kernel | Keep terminal/web approvals. Represent future human gates as approval commands/events. |
+| `src/services/contextBuilder` | Agent Kernel | Keep inside QueryEngine for now. Continue surfacing context events through the bridge. |
+| `src/services/compact` | Durable Runtime / Agent Kernel | Keep current compaction implementation. Connect compact summaries to checkpoint/replay views later. |
+| `src/services/llm` | Model Router | Keep provider definitions and route selection in `ModelRouter`; do not change provider choice inside Durable Runtime. |
+| `src/services/loopRuntime` | Loop Runtime | Keep full legacy loop implementation. Core loop attempts enter Agent work through `AgentKernel.submitRun`. |
 | `src/services/gatewayRuntime` | Gateway Daemon | Keep current gateway runtime. Gateway may submit commands to core, but must not own Agent run state. |
 | `src/services/gui` | GUI Runtime | Keep Dingxu/Windows MCP integration. GUI tools remain behind stable Pando GUI surfaces. |
 | `src/server` | Entry point | Server may depend on core. It should not be a state source or generate Agent run state. |
@@ -28,7 +28,7 @@ Implemented:
 
 ## Phase 2: Agent Kernel Identity
 
-Implemented in this pass:
+Implemented:
 
 - `AgentKernel.submitRun(command)` as the strong Agent entry.
 - Canonical run id normalization in AgentKernel.
@@ -38,16 +38,31 @@ Implemented in this pass:
 - Legacy event bridge into core event stream.
 - Completed, failed, and interrupted checkpoint semantics.
 
-## Phase 3: Durable Runtime Deepening
+## Phase 3: Durable Runtime V1
+
+Implemented in this pass:
+
+- DurableRuntime facade for events, checkpoints, run snapshots, heartbeat, recovery decisions, and audit.
+- EventStore durable seq allocation and redaction.
+- Checkpoint safety contracts.
+- RunSnapshot recovery pointers.
+- Heartbeat stale checks.
+- RecoveryDecision without automatic resume execution.
+- ConsistencyAudit and corruption marker events.
+- Replay reads through DurableRuntime.
+
+## Phase 4: Durable Runtime V2
 
 Next work:
 
-- Promote `RunLedger` into a broader durable run index service if cross-process status queries become necessary.
-- Add atomic compaction/checkpoint index helpers for efficient lookup.
-- Add stale active-run recovery rules for long-lived daemon and gateway operation.
-- Link heartbeat, run ledger, and checkpoint records in one durable diagnostic view.
+- Move `RunLedger` fully behind DurableRuntime instead of reading the agent-owned queue file.
+- Add cross-process durable seq locking.
+- Add typed tool-event bridge payloads.
+- Add explicit side-effect classifier for shell, GUI, gateway outbound, file write, and MCP write events.
+- Add durable artifact refs for large tool results.
+- Add operator review records for `requires_human` recovery decisions.
 
-## Phase 4: ThreadStore Core Primitives
+## Phase 5: ThreadStore Core Primitives
 
 Next work:
 
@@ -56,15 +71,6 @@ Next work:
 - Append canonical `EventEnvelope` records beside legacy thread `AgentEvent` records.
 - Add replay views for thread messages, checkpoints, compactions, and run ledger records.
 
-## Phase 5: Tool Events Complete Bridge
-
-Next work:
-
-- Split generic bridged `tool_call` events into typed `tool_call_started`, `tool_call_completed`, `tool_result`, and approval payload contracts.
-- Preserve tool input redaction guarantees before writing core events.
-- Link large tool results to durable storage artifacts instead of embedding oversized payloads.
-- Add smoke tests for model -> tool -> approval -> result replay timelines.
-
 ## Phase 6: Replay CLI
 
 Next work:
@@ -72,10 +78,11 @@ Next work:
 - Add `pando replay run <runId>` for a readable timeline.
 - Add `pando replay thread <threadId>` for thread-level event history.
 - Add JSON output for external diagnostics.
-- Use canonical run ids and bridged legacy event ids for exact provenance.
+- Include recovery decision, checkpoint list, and audit output.
 
 ## Risk Notes
 
 - `QueryEngine` remains the legacy executor for context, compact, tools, and thread writes.
 - `AgentKernelAdapter` is intentionally thin and should not grow state ownership.
 - Resume is still adapter-level thread initialization, not a dedicated core resume engine.
+- Durable Runtime V1 is not full event sourcing; it is a recovery contract layer.

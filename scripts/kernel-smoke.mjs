@@ -120,7 +120,7 @@ async function smokeStoreAndDurable(core, workspaceRoot) {
     createdAtMs: 1000,
   })
   assert(heartbeat.runtimeId === 'runtime_kernel_smoke', 'heartbeat should be written')
-  assert(await durable.heartbeatManager.isStale('runtime_kernel_smoke', 100, 1200), 'heartbeat should be stale')
+  assert(await durable.heartbeatManager.isStale('runtime_kernel_smoke', 1200, 100), 'heartbeat should be stale')
   const durableEvents = await durable.readEvents()
   assert(durableEvents.some(event => event.eventType === 'checkpoint'), 'checkpoint should also write EventEnvelope')
   assert(durableEvents.some(event => event.eventType === 'heartbeat'), 'heartbeat should also write EventEnvelope')
@@ -151,6 +151,7 @@ async function smokeAgentKernelSubmitRun(core, workspaceRoot) {
   assert(Array.isArray(result.coreEvents) && result.coreEvents.length > 0, 'submitRun should return coreEvents')
   assert(result.coreEvents.some(event => event.runId === result.runId && event.eventType === 'run_start'), 'core events should include run_start')
   assert(result.coreEvents.some(event => event.runId === result.runId && event.eventType === 'run_running'), 'core events should include run_running')
+  assert(result.coreEvents.every(event => Number.isInteger(event.seq) && event.seq > 0), 'submitRun coreEvents should carry durable seq')
   assert(result.coreEvents.some(event => event.eventId.startsWith('event-') && event.runId === result.runId), 'EventBridge should convert legacy events with canonical runId')
   assert(result.coreEvents.some(event => event.eventType === 'checkpoint'), 'checkpoint should be included in run coreEvents')
   assert(result.checkpointId, 'submitRun should return checkpointId')
@@ -158,6 +159,8 @@ async function smokeAgentKernelSubmitRun(core, workspaceRoot) {
   const ledger = core.RunLedger.fromRuntimePaths(durable.paths)
   const ledgerRun = await ledger.readRun(result.runId)
   assert(ledgerRun?.status === 'completed', `ledger should read completed run, got ${ledgerRun?.status}`)
+  const snapshots = await durable.readRunSnapshots(result.runId)
+  assert(snapshots.some(snapshot => snapshot.status === 'completed'), 'completed run should write snapshot')
 }
 
 async function smokeAgentKernelFailureCheckpoint(core, workspaceRoot) {
@@ -189,8 +192,10 @@ async function smokeAgentKernelFailureCheckpoint(core, workspaceRoot) {
   }
   assert(failed, 'failed AgentKernel run should throw')
   const checkpoint = await durable.checkpointManager.readLatestCheckpoint({ runId: command.runId })
-  assert(checkpoint?.status === 'safe_to_replay', `failed checkpoint should be safe_to_replay, got ${checkpoint?.status}`)
+  assert(checkpoint?.status === 'partial_replay', `failed checkpoint should be partial_replay, got ${checkpoint?.status}`)
   assert(String(checkpoint?.payload?.errorPreview ?? '').includes('fake model failure'), 'failed checkpoint should include error preview')
+  const snapshots = await durable.readRunSnapshots(command.runId)
+  assert(snapshots.some(snapshot => snapshot.status === 'failed'), 'failed run should write snapshot')
 }
 
 async function smokeAgentKernelInterruptedCheckpoint(core, workspaceRoot) {
@@ -219,6 +224,8 @@ async function smokeAgentKernelInterruptedCheckpoint(core, workspaceRoot) {
   assert(!events.some(event => event.eventType === 'run_failed'), 'interrupted run must not write run_failed')
   const checkpoint = await durable.checkpointManager.readLatestCheckpoint({ runId: command.runId })
   assert(checkpoint?.status === 'unsafe_to_replay', `interrupted checkpoint should be unsafe_to_replay, got ${checkpoint?.status}`)
+  const snapshots = await durable.readRunSnapshots(command.runId)
+  assert(snapshots.some(snapshot => snapshot.status === 'interrupted'), 'interrupted run should write snapshot')
 }
 
 async function smokeLoopRuntime(core, workspaceRoot) {
@@ -234,7 +241,11 @@ async function smokeLoopRuntime(core, workspaceRoot) {
           toolResults: [],
         },
         coreEvents: [],
+        checkpointId: 'checkpoint_loop_kernel_smoke',
       }
+    },
+    async recordCoreEvent() {
+      return { eventId: 'evt_loop_kernel_smoke', seq: 1 }
     },
   }
   const runtime = new core.LoopRuntime({
@@ -286,20 +297,20 @@ async function smokeModelRouter(core) {
 
 async function smokeReplay(core, workspaceRoot) {
   const durable = new core.DurableRuntime({ workspaceRoot, workspaceId: 'default' })
-  await durable.appendEvent(core.createEventEnvelope({
+  await durable.appendEvent({
     eventType: 'run_start',
     workspaceId: 'default',
     threadId: 'thread_replay_smoke',
     runId: 'run_replay_smoke',
     payload: { status: 'running' },
-  }))
-  await durable.appendEvent(core.createEventEnvelope({
+  })
+  await durable.appendEvent({
     eventType: 'model_response',
     workspaceId: 'default',
     threadId: 'thread_replay_smoke',
     runId: 'run_replay_smoke',
     payload: { text: 'ok' },
-  }))
+  })
   const reader = new core.ReplayReader(durable)
   const events = await reader.read({ runId: 'run_replay_smoke' })
   const timeline = new core.EventReplay().buildTimeline(events)

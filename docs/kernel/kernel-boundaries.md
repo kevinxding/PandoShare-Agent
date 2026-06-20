@@ -46,9 +46,11 @@ Current state:
 Long-running state belongs in append-only or atomic durable stores:
 - JSON state: `AtomicFileStore`
 - JSONL logs: `JsonlStore`
-- checkpoints: `CheckpointManager`
-- heartbeat: `HeartbeatManager`
-- replay events: `DurableRuntime.eventStore`
+- events: `DurableRuntime.appendEvent` / `appendEvents`
+- checkpoints: `DurableRuntime.createCheckpoint`
+- run snapshots: `DurableRuntime.writeRunSnapshot`
+- heartbeat: `DurableRuntime.writeHeartbeat`
+- recovery decisions: `DurableRuntime.decideRecovery`
 
 ## Adapter Rule
 
@@ -68,3 +70,13 @@ New core code should not import Web, CLI, or server modules.
 - `LoopRuntime`, Gateway, Web, and CLI must not generate Agent run state.
 - Loop attempts must read `runId` from `AgentKernelRunResult.runId`, not from their original command object.
 - Legacy `QueryEngine` run ids may be preserved as `payload.legacyRunId` in bridged events, but they must not replace the canonical top-level `EventEnvelope.runId`.
+
+## Durable Runtime Rule
+
+- New core code must not write event JSONL directly.
+- New core code must not write checkpoint JSON/JSONL directly.
+- Durable event seq is assigned only by DurableRuntime/EventStore.
+- Replay must read through DurableRuntime, not runtime memory.
+- RecoveryDecision only classifies recovery state; it must not execute recovery.
+- QueryEngine remains the legacy executor, but its events must enter the durable event store through the AgentKernel bridge.
+- Shell, GUI, gateway outbound, file write, and MCP write effects must not be replayed automatically.

@@ -20,12 +20,20 @@ export class RuntimePaths {
     return join(this.root, 'events', `${safeId(this.workspaceId)}.jsonl`)
   }
 
+  eventSeqPath(): string {
+    return join(this.root, 'state', `${safeId(this.workspaceId)}-event-seq.json`)
+  }
+
   checkpointsPath(): string {
     return join(this.root, 'checkpoints', `${safeId(this.workspaceId)}.jsonl`)
   }
 
   heartbeatsPath(): string {
     return join(this.root, 'heartbeats', `${safeId(this.workspaceId)}.jsonl`)
+  }
+
+  runSnapshotsPath(): string {
+    return join(this.root, 'run-snapshots', `${safeId(this.workspaceId)}.jsonl`)
   }
 
   statePath(name: string): string {

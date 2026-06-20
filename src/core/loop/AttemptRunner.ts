@@ -3,7 +3,7 @@ import type { AgentKernel } from '../agent/index.js'
 import type { Attempt, Task } from './LoopTypes.js'
 
 export class AttemptRunner {
-  constructor(private readonly agentKernel: Pick<AgentKernel, 'submitRun'>) {}
+  constructor(private readonly agentKernel: Pick<AgentKernel, 'submitRun' | 'recordCoreEvent'>) {}
 
   async run(input: {
     workspaceId: string
@@ -30,13 +30,51 @@ export class AttemptRunner {
         ].join('\n'),
       },
     })
-    const result = await this.agentKernel.submitRun(command)
-    return {
-      ...attempt,
-      runId: result.runId,
-      status: 'completed',
-      completedAtMs: Date.now(),
-      summary: result.finalText.slice(0, 500),
+    await this.agentKernel.recordCoreEvent({
+      eventType: 'loop_attempt',
+      workspaceId: input.workspaceId,
+      goalId: input.goalId,
+      taskId: input.task.taskId,
+      payload: {
+        phase: 'started',
+        attemptId: attempt.attemptId,
+      },
+    })
+    try {
+      const result = await this.agentKernel.submitRun(command)
+      await this.agentKernel.recordCoreEvent({
+        eventType: 'loop_attempt',
+        workspaceId: input.workspaceId,
+        goalId: input.goalId,
+        runId: result.runId,
+        taskId: input.task.taskId,
+        payload: {
+          phase: 'completed',
+          attemptId: attempt.attemptId,
+          checkpointId: result.checkpointId,
+        },
+      })
+      return {
+        ...attempt,
+        runId: result.runId,
+        status: 'completed',
+        completedAtMs: Date.now(),
+        checkpointId: result.checkpointId,
+        summary: result.finalText.slice(0, 500),
+      }
+    } catch (error) {
+      await this.agentKernel.recordCoreEvent({
+        eventType: 'loop_attempt',
+        workspaceId: input.workspaceId,
+        goalId: input.goalId,
+        taskId: input.task.taskId,
+        payload: {
+          phase: 'failed',
+          attemptId: attempt.attemptId,
+          message: error instanceof Error ? error.message : String(error),
+        },
+      })
+      throw error
     }
   }
 }

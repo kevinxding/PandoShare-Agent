@@ -1,5 +1,4 @@
 import { DurableRuntime } from '../durable/index.js'
-import { createEventEnvelope } from '../protocol/index.js'
 import { JsonlStore, RuntimePaths } from '../store/index.js'
 import { GatewayCommandRouter } from './GatewayCommandRouter.js'
 import { GatewayDeliveryQueue } from './GatewayDeliveryQueue.js'
@@ -30,14 +29,14 @@ export class GatewayDaemon {
     await this.queue.enqueueInbound(fullMessage)
     await this.writeHeartbeat('running', 'Gateway received a message.')
     const route = this.router.route(fullMessage)
-    await this.durable.appendEvent(createEventEnvelope({
+    await this.durable.appendEvent({
       eventType: 'gateway_message',
       workspaceId: this.input.workspaceId ?? 'default',
       payload: {
         message: fullMessage,
         commandType: route.command.commandType,
       },
-    }))
+    })
     if (route.replyText) {
       await this.queue.enqueueOutbound({
         replyToMessageId: fullMessage.messageId,
@@ -54,6 +53,7 @@ export class GatewayDaemon {
       workspaceId: this.input.workspaceId ?? 'default',
       runtimeId: this.input.runtimeId ?? 'gateway',
       kernel: 'gateway',
+      workerType: 'gateway',
       status,
       message,
     })

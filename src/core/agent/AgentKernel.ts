@@ -1,7 +1,12 @@
 import type { QueryEngineOptions } from '../../QueryEngine.js'
 import type { QueryTurnOutput } from '../../query.js'
 import type { AgentEvent } from '../../services/events/index.js'
-import { DurableRuntime, type KernelCheckpoint } from '../durable/index.js'
+import {
+  DurableRuntime,
+  type DurableEventInput,
+  type KernelCheckpoint,
+  type RunSnapshotActivePhase,
+} from '../durable/index.js'
 import {
   createCommandEnvelope,
   createProtocolId,
@@ -91,7 +96,7 @@ export class AgentKernel {
       const checkpoint = await this.createRunCheckpoint('completed', normalizedCommand, completed, { output })
       return this.buildResult(normalizedCommand, completed, output, checkpoint)
     } catch (error) {
-      await this.forwardLegacyEvents(context).catch(() => undefined)
+      await this.forwardLegacyEvents(context)
       const current = this.stateMachine.readRun(run.runId)
       if (current?.status === 'interrupted') {
         const output = syntheticOutput(`run interrupted: ${run.runId}`)
@@ -144,6 +149,10 @@ export class AgentKernel {
     this.adapter.abort(reason)
   }
 
+  recordCoreEvent(input: DurableEventInput): Promise<EventEnvelope> {
+    return this.appendDurableEvent(input)
+  }
+
   private normalizeCommand(command: CommandEnvelope): CommandEnvelope {
     const payloadThreadId = threadIdFromPayload(command.payload)
     return createCommandEnvelope({
@@ -177,14 +186,19 @@ export class AgentKernel {
 
   private async forwardLegacyEvents(context: RunContext): Promise<void> {
     const events = this.eventBridge.convert(this.adapter.events(), context)
-    for (const event of events) {
-      await this.appendCoreEvent(event)
-    }
+    const persisted = await this.durable.appendEvents(events.map(eventToDurableInput))
+    this.envelopeEvents.push(...persisted)
   }
 
   private async appendCoreEvent(event: EventEnvelope): Promise<void> {
-    this.envelopeEvents.push(event)
-    await this.durable.appendEvent(event)
+    await this.appendDurableEvent(eventToDurableInput(event))
+  }
+
+  private async appendDurableEvent(input: DurableEventInput): Promise<EventEnvelope> {
+    const persisted = await this.durable.appendEvent(input)
+    this.envelopeEvents.push(persisted)
+    await this.writeSnapshotForEvent(persisted)
+    return persisted
   }
 
   private async createRunCheckpoint(
@@ -204,8 +218,14 @@ export class AgentKernel {
       runId: state.runId,
       goalId: state.goalId,
       loopId: state.loopId,
-      status: status === 'interrupted' ? 'unsafe_to_replay' : 'safe_to_replay',
+      status: status === 'interrupted' ? 'unsafe_to_replay' : status === 'failed' ? 'partial_replay' : 'safe_to_replay',
       reason: status === 'interrupted' ? input.reason ?? 'interrupted_by_user' : undefined,
+      commandId: command.commandId,
+      summary: status === 'failed'
+        ? `run failed: ${input.error ? errorMessage(input.error) : 'unknown error'}`
+        : status === 'interrupted'
+          ? 'run interrupted'
+          : 'run completed',
       payload: {
         runId: state.runId,
         threadId,
@@ -229,10 +249,68 @@ export class AgentKernel {
       threadId,
       finalText: output.finalText,
       output,
-      coreEvents: await this.durable.readEvents({ runId: state.runId }),
+      coreEvents: await this.durable.readRunEvents(state.runId),
       checkpointId: checkpoint.checkpointId,
     }
   }
+
+  private async writeSnapshotForEvent(event: EventEnvelope): Promise<void> {
+    if (!event.runId || !isCoreRunLifecycleEvent(event.eventType)) return
+    const status = statusFromRunEvent(event)
+    if (!status) return
+    await this.durable.writeRunSnapshot({
+      workspaceId: event.workspaceId,
+      runId: event.runId,
+      threadId: event.threadId,
+      status,
+      lastEventSeq: event.seq,
+      activePhase: phaseFromStatus(status),
+    })
+  }
+}
+
+function eventToDurableInput(event: EventEnvelope): DurableEventInput {
+  return {
+    eventId: event.eventId,
+    eventType: event.eventType,
+    workspaceId: event.workspaceId,
+    threadId: event.threadId,
+    runId: event.runId,
+    goalId: event.goalId,
+    loopId: event.loopId,
+    taskId: event.taskId,
+    toolCallId: event.toolCallId,
+    parentEventId: event.parentEventId,
+    createdAtMs: event.createdAtMs,
+    payload: event.payload,
+  }
+}
+
+function isCoreRunLifecycleEvent(eventType: string): boolean {
+  return eventType === 'run_created' ||
+    eventType === 'run_start' ||
+    eventType === 'run_running' ||
+    eventType === 'run_complete' ||
+    eventType === 'run_failed' ||
+    eventType === 'run_interrupted'
+}
+
+function statusFromRunEvent(event: EventEnvelope): RunState['status'] | undefined {
+  if (event.eventType === 'run_created') return 'created'
+  if (event.eventType === 'run_start') return 'started'
+  if (event.eventType === 'run_running') return 'running'
+  if (event.eventType === 'run_complete') return 'completed'
+  if (event.eventType === 'run_failed') return 'failed'
+  if (event.eventType === 'run_interrupted') return 'interrupted'
+  return undefined
+}
+
+function phaseFromStatus(status: RunState['status']): RunSnapshotActivePhase {
+  if (status === 'created' || status === 'started') return 'starting'
+  if (status === 'running' || status === 'waiting_approval') return status === 'waiting_approval' ? 'approval' : 'model'
+  if (status === 'completed') return 'completed'
+  if (status === 'failed') return 'failed'
+  return 'interrupted'
 }
 
 function threadIdFromPayload(payload: unknown): string | undefined {

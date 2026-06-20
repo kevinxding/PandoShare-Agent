@@ -1,4 +1,4 @@
-import { isDangerousGuiAction, createEventEnvelope } from '../protocol/index.js'
+import { isDangerousGuiAction } from '../protocol/index.js'
 import { DurableRuntime } from '../durable/index.js'
 import { JsonlStore, RuntimePaths } from '../store/index.js'
 import { DingxuGuiAdapter, MockGuiAdapter } from './DingxuGuiAdapter.js'
@@ -44,7 +44,7 @@ export class GuiRuntime {
       throw new Error(`GUI action requires approval: ${action.action}`)
     }
     const beforeObservation = await this.observe()
-    await this.durable.appendEvent(createEventEnvelope({
+    await this.durable.appendEvent({
       eventType: 'gui_action',
       workspaceId: this.workspaceId,
       payload: {
@@ -52,7 +52,7 @@ export class GuiRuntime {
         action,
         beforeObservation,
       },
-    }))
+    })
     const result = await this.adapter.act(action)
     const afterObservation = await this.observe()
     const verification = action.verify ? await this.verifier.verify(action) : {
@@ -60,7 +60,7 @@ export class GuiRuntime {
       message: result.message,
       screenshotRef: result.screenshotRef,
     }
-    const event = createEventEnvelope({
+    const event = await this.durable.appendEvent({
       eventType: 'gui_action',
       workspaceId: this.workspaceId,
       payload: {
@@ -70,7 +70,6 @@ export class GuiRuntime {
         verification,
       },
     })
-    await this.durable.appendEvent(event)
     const record: GuiRuntimeActionRecord = {
       actionId: `gui_action_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
       beforeObservation,

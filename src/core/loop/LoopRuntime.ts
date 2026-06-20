@@ -1,6 +1,5 @@
 import { DurableRuntime } from '../durable/index.js'
 import { AgentKernel } from '../agent/index.js'
-import { createEventEnvelope } from '../protocol/index.js'
 import { AttemptRunner } from './AttemptRunner.js'
 import { GoalPlanner } from './GoalPlanner.js'
 import { HumanGate } from './HumanGate.js'
@@ -54,7 +53,7 @@ export class LoopRuntime {
         reason: 'Task requires approval.',
       })
     }
-    await this.durable.appendEvent(createEventEnvelope({
+    await this.durable.appendEvent({
       eventType: 'loop_iteration',
       workspaceId: this.workspaceId,
       goalId: goal.goalId,
@@ -63,7 +62,7 @@ export class LoopRuntime {
         phase: 'started',
         task,
       },
-    }))
+    })
     const attempt = await this.attempts.run({
       workspaceId: this.workspaceId,
       goalId: goal.goalId,
@@ -79,7 +78,7 @@ export class LoopRuntime {
         verification,
       },
     })
-    await this.durable.appendEvent(createEventEnvelope({
+    await this.durable.appendEvent({
       eventType: 'loop_iteration',
       workspaceId: this.workspaceId,
       goalId: goal.goalId,
@@ -90,7 +89,7 @@ export class LoopRuntime {
         checkpointId: checkpoint.checkpointId,
         verification,
       },
-    }))
+    })
     return {
       goal: {
         ...goal,

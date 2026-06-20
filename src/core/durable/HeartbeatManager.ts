@@ -1,50 +1,96 @@
+import { createProtocolId } from '../protocol/index.js'
 import { JsonlStore } from '../store/index.js'
+import { redactDurablePayload } from './DurableRedaction.js'
 
 export type KernelHeartbeat = {
   heartbeatId: string
   workspaceId: string
+  workerId: string
+  workerType: 'agent' | 'loop' | 'gateway' | 'gui' | 'model' | 'test'
+  runId?: string
+  loopId?: string
+  gatewayId?: string
+  pid?: number
+  status: 'starting' | 'running' | 'idle' | 'stopping' | 'stopped' | 'stale' | 'failed'
+  lastSeq?: number
+  lastHeartbeatAtMs: number
+  metadata?: unknown
   runtimeId: string
   kernel: string
-  status: 'starting' | 'running' | 'stopping' | 'stopped' | 'failed'
-  createdAtMs: number
   message?: string
   payload?: unknown
+}
+
+export type WriteHeartbeatInput = Omit<
+  KernelHeartbeat,
+  'heartbeatId' | 'lastHeartbeatAtMs' | 'workerId' | 'workerType' | 'runtimeId' | 'kernel'
+> & {
+  heartbeatId?: string
+  lastHeartbeatAtMs?: number
+  workerId?: string
+  workerType?: KernelHeartbeat['workerType']
+  runtimeId?: string
+  kernel?: string
+  createdAtMs?: number
 }
 
 export class HeartbeatManager {
   constructor(private readonly store: JsonlStore<KernelHeartbeat>) {}
 
-  async writeHeartbeat(input: Omit<KernelHeartbeat, 'heartbeatId' | 'createdAtMs'> & {
-    heartbeatId?: string
-    createdAtMs?: number
-  }): Promise<KernelHeartbeat> {
+  async writeHeartbeat(input: WriteHeartbeatInput): Promise<KernelHeartbeat> {
+    const workerId = input.workerId ?? input.runtimeId
+    if (!workerId) throw new Error('Heartbeat requires workerId')
+    const workerType = input.workerType ?? workerTypeFromLegacyKernel(input.kernel)
+    const heartbeatAt = input.lastHeartbeatAtMs ?? input.createdAtMs ?? Date.now()
     const heartbeat: KernelHeartbeat = {
-      heartbeatId: input.heartbeatId ?? `heartbeat_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+      heartbeatId: input.heartbeatId ?? createProtocolId('heartbeat'),
       workspaceId: input.workspaceId,
-      runtimeId: input.runtimeId,
-      kernel: input.kernel,
+      workerId,
+      workerType,
+      runId: input.runId,
+      loopId: input.loopId,
+      gatewayId: input.gatewayId,
+      pid: input.pid,
       status: input.status,
-      createdAtMs: input.createdAtMs ?? Date.now(),
+      lastSeq: input.lastSeq,
+      lastHeartbeatAtMs: heartbeatAt,
+      metadata: redactDurablePayload(input.metadata),
+      runtimeId: workerId,
+      kernel: input.kernel ?? workerType,
       message: input.message,
-      payload: input.payload,
+      payload: redactDurablePayload(input.payload),
     }
     await this.store.append(heartbeat)
     return heartbeat
   }
 
-  async readHeartbeat(runtimeId: string): Promise<KernelHeartbeat | undefined> {
-    return (await this.listHeartbeats({ runtimeId })).sort((left, right) => right.createdAtMs - left.createdAtMs)[0]
+  async readHeartbeat(workerId: string): Promise<KernelHeartbeat | undefined> {
+    return (await this.listHeartbeats({ workerId })).sort((left, right) => right.lastHeartbeatAtMs - left.lastHeartbeatAtMs)[0]
   }
 
-  async listHeartbeats(input: { runtimeId?: string; kernel?: string } = {}): Promise<KernelHeartbeat[]> {
+  async readRunHeartbeat(runId: string): Promise<KernelHeartbeat | undefined> {
+    return (await this.listHeartbeats({ runId })).sort((left, right) => right.lastHeartbeatAtMs - left.lastHeartbeatAtMs)[0]
+  }
+
+  async listHeartbeats(input: { workerId?: string; runtimeId?: string; workerType?: string; kernel?: string; runId?: string } = {}): Promise<KernelHeartbeat[]> {
     return (await this.store.readRecords())
+      .filter(record => input.workerId === undefined || record.workerId === input.workerId)
       .filter(record => input.runtimeId === undefined || record.runtimeId === input.runtimeId)
+      .filter(record => input.workerType === undefined || record.workerType === input.workerType)
       .filter(record => input.kernel === undefined || record.kernel === input.kernel)
+      .filter(record => input.runId === undefined || record.runId === input.runId)
   }
 
-  async isStale(runtimeId: string, staleAfterMs: number, nowMs = Date.now()): Promise<boolean> {
-    const heartbeat = await this.readHeartbeat(runtimeId)
+  async isStale(workerId: string, nowMs: number, ttlMs: number): Promise<boolean> {
+    const heartbeat = await this.readHeartbeat(workerId)
     if (!heartbeat) return true
-    return nowMs - heartbeat.createdAtMs > staleAfterMs
+    return nowMs - heartbeat.lastHeartbeatAtMs > ttlMs
   }
+}
+
+function workerTypeFromLegacyKernel(kernel?: string): KernelHeartbeat['workerType'] {
+  if (kernel === 'agent' || kernel === 'loop' || kernel === 'gateway' || kernel === 'gui' || kernel === 'model' || kernel === 'test') {
+    return kernel
+  }
+  return 'test'
 }
