@@ -67,7 +67,7 @@ Implemented in this pass:
 Next work:
 
 - Move `RunLedger` fully behind DurableRuntime instead of reading the agent-owned queue file.
-- Add cross-process durable seq locking.
+- Keep durable seq lock hardening under regression coverage.
 - Add typed tool-event bridge payloads.
 - Add explicit side-effect classifier for shell, GUI, gateway outbound, file write, and MCP write events.
 - Add durable artifact refs for large tool results.
@@ -187,3 +187,15 @@ Next migration round:
 4. ToolRuntime should add typed event payloads for richer tool projections.
 5. Context, memory, and compaction should get dedicated replay sections.
 6. Real-time replay stream should wait until Web UI exists.
+
+## Reality Alignment Authority
+
+Implemented in this pass:
+
+- Added package, API contract, docs, dist, and clean-state reality checks.
+- Added generated acceptance report output under `docs/kernel/generated-acceptance-report.md`.
+- Added `docs/kernel/reality-matrix.md` as the source/docs/scripts alignment index.
+
+Next work:
+
+- Move these local checks into CI/release once the local authority stays stable.

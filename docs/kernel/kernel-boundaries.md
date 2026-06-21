@@ -139,3 +139,9 @@ New core code should not import Web, CLI, or server modules.
 - Replay may only read DurableRuntime, projection caches, checkpoints, recovery decisions, audits, and safe artifact refs.
 - Replay output must be redacted by default.
 - Replay recommendations are advisory only and must not execute recovery or approvals.
+
+## Reality Alignment Boundary
+
+Generated acceptance evidence is the only authority for pass/fail claims. Docs may describe contracts and risks, but release status must come from `docs/kernel/generated-acceptance-report.md` created by `npm run acceptance:generate`.
+
+Reality smoke scripts must check source and dist after build. They must not rely on old `dist` output, local runtime data, or manual README claims.

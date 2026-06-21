@@ -87,7 +87,14 @@
     "replay:incident-smoke": "npm run build -- --pretty false && node scripts/replay-incident-smoke.mjs",
     "replay:export-smoke": "npm run build -- --pretty false && node scripts/replay-export-smoke.mjs",
     "replay:api-smoke": "npm run build -- --pretty false && node scripts/replay-api-smoke.mjs",
-    "replay:cli-smoke": "npm run build -- --pretty false && node scripts/replay-cli-smoke.mjs"
+    "replay:cli-smoke": "npm run build -- --pretty false && node scripts/replay-cli-smoke.mjs",
+    "acceptance:generate": "node scripts/generate-acceptance-report.mjs --profile full",
+    "acceptance:full": "node scripts/generate-acceptance-report.mjs --profile full",
+    "reality:api-contract": "npm run build -- --pretty false && node scripts/reality-api-contract-smoke.mjs",
+    "reality:package": "node scripts/reality-package-smoke.mjs",
+    "reality:docs": "node scripts/reality-docs-smoke.mjs",
+    "reality:dist": "npm run build -- --pretty false && node scripts/reality-dist-smoke.mjs",
+    "reality:clean-clone": "node scripts/clean-clone-acceptance.mjs"
   },
   "engines": {
     "node": ">=18.0.0"
