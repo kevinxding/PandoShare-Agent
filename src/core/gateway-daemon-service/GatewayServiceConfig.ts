@@ -14,10 +14,12 @@ export type GatewayServiceConfig = {
   continuous?: boolean
   adapters?: readonly GatewayChannelAdapter[]
   outboundFailureMode?: GatewayAdapterFailureClass
+  enableScheduledAutomations?: boolean
+  maxScheduledJobsPerTick?: number
 }
 
 export type NormalizedGatewayServiceConfig = Required<Pick<GatewayServiceConfig,
-  'workspaceRoot' | 'workspaceId' | 'runtimeId' | 'intervalMs' | 'maxInboundPerTick' | 'maxOutboundPerTick' | 'staleAfterMs'
+  'workspaceRoot' | 'workspaceId' | 'runtimeId' | 'intervalMs' | 'maxInboundPerTick' | 'maxOutboundPerTick' | 'staleAfterMs' | 'enableScheduledAutomations' | 'maxScheduledJobsPerTick'
 >> & Omit<GatewayServiceConfig, 'workspaceRoot' | 'workspaceId' | 'runtimeId' | 'intervalMs' | 'maxInboundPerTick' | 'maxOutboundPerTick' | 'staleAfterMs'>
 
 export function normalizeGatewayServiceConfig(input: GatewayServiceConfig): NormalizedGatewayServiceConfig {
@@ -30,6 +32,8 @@ export function normalizeGatewayServiceConfig(input: GatewayServiceConfig): Norm
     maxInboundPerTick: Math.max(0, input.maxInboundPerTick ?? 5),
     maxOutboundPerTick: Math.max(0, input.maxOutboundPerTick ?? 5),
     staleAfterMs: Math.max(1, input.staleAfterMs ?? 30_000),
+    enableScheduledAutomations: input.enableScheduledAutomations ?? false,
+    maxScheduledJobsPerTick: Math.max(0, input.maxScheduledJobsPerTick ?? 5),
   }
 }
 

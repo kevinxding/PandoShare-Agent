@@ -47,6 +47,7 @@ import {
 } from './services/threadStore/index.js'
 import { createRuntimeToolRegistry } from './tools.js'
 import { startPandoServer } from './server/index.js'
+import { runPandoTui } from './tui/index.js'
 
 type RuntimeProcess = {
   argv: string[]
@@ -113,6 +114,11 @@ export async function main(argv = getRuntimeProcess().argv.slice(2)): Promise<vo
 
   if (args.kind === 'replay') {
     await runReplayCommand(args, runtimeProcess)
+    return
+  }
+
+  if (args.kind === 'tui') {
+    await runTuiCommand(args, runtimeProcess)
     return
   }
 
@@ -318,6 +324,18 @@ type ParsedArgs =
       goalId?: string
     }
   | {
+      kind: 'tui'
+      configPath?: string
+      provider?: string
+      model?: string
+      threadId?: string
+      resumeLast?: boolean
+      newThread?: boolean
+      goalId?: string
+      smoke?: boolean
+      plain?: boolean
+    }
+  | {
       kind: 'repl'
       configPath?: string
       provider?: string
@@ -367,8 +385,88 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
   if (argv[0] === 'loop') return parseLoopCommand(argv.slice(1))
   if (argv[0] === 'serve') return parseServeCommand(argv.slice(1))
   if (argv[0] === 'replay') return parseReplayCommand(argv.slice(1))
+  if (argv[0] === 'tui') return parseTuiCommand(argv.slice(1))
+  if (argv[0] === 'repl') return parseReplCommand(argv.slice(1))
   if (argv[0] === 'exec') return parseRunArgs(argv.slice(1), 'exec')
+  if (hasNoPromptArg(argv)) return parseTuiCommand(argv)
   return parseRunArgs(argv, 'direct')
+}
+
+
+function parseTuiCommand(argv: readonly string[]): Extract<ParsedArgs, { kind: 'tui' }> {
+  const parsed = parseInteractiveOptions(argv, true)
+  return { kind: 'tui', ...parsed }
+}
+
+function parseReplCommand(argv: readonly string[]): Extract<ParsedArgs, { kind: 'repl' }> {
+  const parsed = parseInteractiveOptions(argv, false)
+  return { kind: 'repl', configPath: parsed.configPath, provider: parsed.provider, model: parsed.model, threadId: parsed.threadId, resumeLast: parsed.resumeLast, newThread: parsed.newThread, goalId: parsed.goalId }
+}
+
+function parseInteractiveOptions(argv: readonly string[], allowSmoke: boolean): { configPath?: string; provider?: string; model?: string; threadId?: string; resumeLast?: boolean; newThread?: boolean; goalId?: string; smoke?: boolean; plain?: boolean } {
+  const common = parseCommonOptions(argv)
+  let provider: string | undefined
+  let model: string | undefined
+  let threadId: string | undefined
+  let resumeLast = false
+  let newThread = false
+  let goalId: string | undefined
+  let smoke = false
+  let plain = false
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    switch (arg) {
+      case '--config':
+        index += 1
+        break
+      case '--provider':
+        provider = parseProviderId(requiredArg(argv[index + 1], '--provider requires a provider id'))
+        index += 1
+        break
+      case '--model':
+        model = parseModelName(requiredArg(argv[index + 1], '--model requires a model name'))
+        index += 1
+        break
+      case '--thread':
+        threadId = requiredArg(argv[index + 1], '--thread requires a thread id')
+        index += 1
+        break
+      case '--resume-last':
+        resumeLast = true
+        break
+      case '--new-thread':
+        newThread = true
+        break
+      case '--goal':
+        goalId = requiredArg(argv[index + 1], '--goal requires a goal id')
+        index += 1
+        break
+      case '--smoke':
+        if (!allowSmoke) throw new Error('--smoke is only supported by pando tui')
+        smoke = true
+        break
+      case '--plain':
+        if (!allowSmoke) throw new Error('--plain is only supported by pando tui')
+        plain = true
+        break
+      default:
+        if (arg.startsWith('--')) throw new Error(`Unknown option: ${arg}`)
+        throw new Error(`Unexpected positional argument for interactive mode: ${arg}`)
+    }
+  }
+  if (newThread && threadId) throw new Error('--new-thread cannot be combined with --thread')
+  if (newThread && resumeLast) throw new Error('--new-thread cannot be combined with --resume-last')
+  if (threadId && resumeLast) throw new Error('--thread cannot be combined with --resume-last')
+  return { configPath: common.configPath, provider, model, threadId, resumeLast, newThread, goalId, smoke, plain }
+}
+
+function hasNoPromptArg(argv: readonly string[]): boolean {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    if (!arg.startsWith('--')) return false
+    if (arg === '--config' || arg === '--provider' || arg === '--model' || arg === '--thread' || arg === '--goal') index += 1
+  }
+  return true
 }
 
 function parseRunArgs(argv: readonly string[], mode: 'direct' | 'exec'): Extract<ParsedArgs, { kind: 'run' | 'repl' }> {
@@ -918,6 +1016,27 @@ function parseServeCommand(argv: readonly string[]): Extract<ParsedArgs, { kind:
     port,
     open,
   }
+}
+
+
+async function runTuiCommand(args: Extract<ParsedArgs, { kind: 'tui' }>, runtimeProcess: RuntimeProcess): Promise<void> {
+  await runPandoTui({
+    cwd: runtimeProcess.cwd(),
+    configPath: args.configPath,
+    provider: args.provider,
+    model: args.model,
+    threadId: args.threadId,
+    resumeLast: args.resumeLast,
+    newThread: args.newThread,
+    goalId: args.goalId,
+    smoke: args.smoke,
+    plain: args.plain,
+    io: {
+      input: runtimeProcess.stdin,
+      output: runtimeProcess.stdout,
+      error: runtimeProcess.stderr,
+    },
+  })
 }
 
 async function runPrompt(args: Extract<ParsedArgs, { kind: 'run' }>, runtimeProcess: RuntimeProcess): Promise<void> {

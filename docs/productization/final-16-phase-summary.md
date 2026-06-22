@@ -1,6 +1,6 @@
 # Final 16 Phase Productization Summary
 
-Status: implemented baseline for phases 1-16.
+Status: implemented baseline for phases 1-17. Phase 17 extends the final productization baseline with Scheduled Automations V1.
 
 ## Phase 12-16 Baselines
 
@@ -9,6 +9,14 @@ Status: implemented baseline for phases 1-16.
 - Phase 14 CI/Release Engineering: GitHub workflow baseline, release dry-run scripts, release notes, package smoke, and checklist.
 - Phase 15 72h Chaos: configurable chaos harness with short smoke and explicit 72h runbook.
 - Phase 16 Cloud Worker Foundation: local/mock worker registry, job envelope, leasing, artifact manifest, and local-first boundary.
+
+## Phase 17 Scheduled Automations
+
+- Local scheduled job store under `.pandoshare/scheduled/jobs.jsonl` and `.pandoshare/scheduled/runs.jsonl`.
+- BackendService and Mission Control scheduled actions for create, update, pause, resume, delete, tick, runNow, health, and runs.
+- Gateway service opt-in heartbeat integration through `enableScheduledAutomations`.
+- Replay timeline categorizes `scheduled_` durable events.
+- Acceptance authority: `scheduled:smoke` and `schedule-tools:smoke`.
 
 ## Known Blockers
 
@@ -20,4 +28,4 @@ Status: implemented baseline for phases 1-16.
 
 ## Verification Plan
 
-Run npm run acceptance:full plus the Phase 12-16 smoke scripts listed in package.json.
+Run npm run acceptance:full plus the Phase 12-17 smoke scripts listed in package.json.

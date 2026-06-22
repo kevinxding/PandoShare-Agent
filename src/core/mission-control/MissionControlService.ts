@@ -37,12 +37,38 @@ export class MissionControlService {
   getApprovals(_query: MissionControlQuery = {}): MissionControlResponse<Record<string, unknown>> { return this.wrap(emptyApprovalSummary()) }
   getCosts(_query: MissionControlQuery = {}): MissionControlResponse<Record<string, unknown>> { return this.wrap(this.getOverview().data.cost) }
   getEvents(query: MissionControlQuery = {}): MissionControlResponse<Array<Record<string, unknown>>> { return this.wrap(this.getOverview().data.recentEvents, queryWarning(query, 'events')) }
+
+  getScheduledJobs(query: MissionControlQuery = {}): Promise<MissionControlResponse<unknown>> {
+    return this.runScheduledBackend('scheduled.list', query as Record<string, unknown>)
+  }
+
+  getScheduledJob(jobId: string): Promise<MissionControlResponse<unknown>> {
+    return this.runScheduledBackend('scheduled.get', { jobId })
+  }
+
+  getScheduledRuns(query: MissionControlQuery & { jobId?: string } = {}): Promise<MissionControlResponse<unknown>> {
+    return this.runScheduledBackend('scheduled.runs', query as Record<string, unknown>)
+  }
+
+  getScheduledHealth(): Promise<MissionControlResponse<unknown>> {
+    return this.runScheduledBackend('scheduled.health', {})
+  }
+
+  runScheduledAction(input: { action: string; payload?: Record<string, unknown>; requestId?: string }): Promise<MissionControlResponse<unknown>> {
+    return this.runScheduledBackend(input.action, input.payload ?? {}, input.requestId)
+  }
+
   actions(): MissionControlResponse<string[]> { return this.wrap(listMissionControlActions()) }
 
   async runAction(input: MissionControlActionRequest): Promise<MissionControlResponse<MissionControlActionResult>> {
     const backendAction = toBackendAction(input.action)
     const backend = await this.backend.handle({ action: backendAction, payload: input.payload ?? {}, requestId: input.requestId })
     return this.wrap({ action: input.action, backendAction, backend: redactObject(backend as unknown as Record<string, unknown>) as unknown as typeof backend }, backend.ok ? [] : ['BackendService returned a non-ok action response.'], backend.eventIds)
+  }
+
+  private async runScheduledBackend(action: string, payload: Record<string, unknown>, requestId?: string): Promise<MissionControlResponse<unknown>> {
+    const backend = await this.backend.handle({ action, payload, requestId })
+    return this.wrap(backend.data ?? backend.error ?? {}, backend.ok ? [] : ['BackendService returned a non-ok scheduled response.'], backend.eventIds)
   }
 
   private wrap<TData>(data: TData, warnings: string[] = [], eventIds: string[] = []): MissionControlResponse<TData> {

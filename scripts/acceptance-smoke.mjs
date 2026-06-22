@@ -143,6 +143,7 @@ function stepsForProfile(profile) {
     npmStep('mcp-resource-tools-smoke', ['run', 'mcp-resource-tools:smoke']),
     npmStep('ask-user-tool-smoke', ['run', 'ask-user-tool:smoke']),
     npmStep('schedule-tools-smoke', ['run', 'schedule-tools:smoke']),
+    npmStep('scheduled-smoke', ['run', 'scheduled:smoke']),
     npmStep('notebook-tool-smoke', ['run', 'notebook-tool:smoke']),
     npmStep('tool-permissions-smoke', ['run', 'tool-permissions:smoke']),
     npmStep('tool-events-smoke', ['run', 'tool-events:smoke']),

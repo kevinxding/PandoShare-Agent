@@ -352,23 +352,31 @@ async function requestModelResponse(
   let deltaEventsEmitted = false
   let completed = false
 
-  for await (const event of streamText(request, options)) {
-    provider = event.provider
-    model = event.model
-    if (event.type === 'text_delta') {
-      text += event.delta
-      deltaEventsEmitted = true
-      await emitAgentEvent(context.toolContext, {
-        ...eventBase(context.eventContext, 'agent_message_delta'),
-        type: 'agent_message_delta',
-        delta: event.delta,
-      })
-    } else {
-      completed = true
-      text = event.text
-      toolCalls = event.toolCalls ?? []
-      usage = event.usage
-      raw = event.raw
+  try {
+    for await (const event of streamText(request, options)) {
+      provider = event.provider
+      model = event.model
+      if (event.type === 'text_delta') {
+        text += event.delta
+        deltaEventsEmitted = true
+        await emitAgentEvent(context.toolContext, {
+          ...eventBase(context.eventContext, 'agent_message_delta'),
+          type: 'agent_message_delta',
+          delta: event.delta,
+        })
+      } else {
+        completed = true
+        text = event.text
+        toolCalls = event.toolCalls ?? []
+        usage = event.usage
+        raw = event.raw
+      }
+    }
+  } catch (error) {
+    if (text || toolCalls.length) throw error
+    return {
+      response: await generateText(request, options),
+      deltaEventsEmitted: false,
     }
   }
 

@@ -1,10 +1,14 @@
 ﻿import { DaemonCommand, DaemonHealth, DaemonProcess, type DaemonForegroundRunResult } from '../daemon/index.js'
 import { GatewayDaemon, type GatewayDaemonOptions, type GatewayInboundInput, type GatewayTickResult } from '../gateway/index.js'
+import { ScheduledAutomationRuntime, type ScheduledAutomationTickResult } from '../scheduled-automations/index.js'
 import { createDefaultGatewayServiceAdapters, normalizeGatewayServiceConfig, type GatewayServiceConfig, type NormalizedGatewayServiceConfig } from './GatewayServiceConfig.js'
 import { readGatewayServiceHealth, type GatewayServiceHealthReport } from './GatewayServiceHealth.js'
 
+export type GatewayServiceScheduledTick = ScheduledAutomationTickResult | { ok: false; error: string }
+
 export type GatewayServiceTickSummary = GatewayTickResult & {
   tickIndex: number
+  scheduled?: GatewayServiceScheduledTick
 }
 
 export type GatewayServiceRunOptions = {
@@ -26,10 +30,18 @@ export class GatewayServiceRuntime {
   readonly process: DaemonProcess
   readonly command: DaemonCommand
   readonly health: DaemonHealth
+  readonly scheduled?: ScheduledAutomationRuntime
 
-  constructor(input: GatewayServiceConfig & { gateway?: GatewayDaemon }) {
+  constructor(input: GatewayServiceConfig & { gateway?: GatewayDaemon; scheduledRuntime?: ScheduledAutomationRuntime }) {
     this.config = normalizeGatewayServiceConfig(input)
     this.gateway = input.gateway ?? new GatewayDaemon(this.gatewayOptions())
+    this.scheduled = input.scheduledRuntime ?? (this.config.enableScheduledAutomations ? new ScheduledAutomationRuntime({
+      workspaceRoot: this.config.workspaceRoot,
+      workspaceId: this.config.workspaceId,
+      durable: this.gateway.durable,
+      gateway: this.gateway,
+      loopWake: this.gateway.wakeScheduler,
+    }) : undefined)
     const identity = {
       workspaceRoot: this.config.workspaceRoot,
       workspaceId: this.config.workspaceId,
@@ -65,6 +77,7 @@ export class GatewayServiceRuntime {
       maxInbound: this.config.maxInboundPerTick,
       maxOutbound: this.config.maxOutboundPerTick,
     })
+    const scheduled = await this.tickScheduledAutomations()
     await this.health.writeHeartbeat({
       status: 'running',
       message: `Gateway service tick ${tickIndex}.`,
@@ -74,11 +87,13 @@ export class GatewayServiceRuntime {
         outboundProcessed: result.outboundProcessed,
         queuedOutboundCount: result.health.queuedOutboundCount,
         retryOutboundCount: result.health.retryOutboundCount,
+        scheduled,
       },
     })
     return {
       tickIndex,
       ...result,
+      scheduled,
     }
   }
 
@@ -128,6 +143,15 @@ export class GatewayServiceRuntime {
       ...this.config,
       gatewayHealth: () => this.gateway.health(),
     })
+  }
+
+  private async tickScheduledAutomations(): Promise<GatewayServiceScheduledTick | undefined> {
+    if (!this.config.enableScheduledAutomations || !this.scheduled) return undefined
+    try {
+      return await this.scheduled.tick({ maxJobs: this.config.maxScheduledJobsPerTick })
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
   }
 
   private gatewayOptions(): GatewayDaemonOptions {

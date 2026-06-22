@@ -12,6 +12,17 @@ const ACTION_MAP: Record<MissionControlAction, BackendAction> = {
   'gui.reject': 'gui.reject',
   'model.route': 'model.route',
   'replay.export': 'replay.export',
+  'scheduled.create': 'scheduled.create',
+  'scheduled.update': 'scheduled.update',
+  'scheduled.delete': 'scheduled.delete',
+  'scheduled.pause': 'scheduled.pause',
+  'scheduled.resume': 'scheduled.resume',
+  'scheduled.list': 'scheduled.list',
+  'scheduled.get': 'scheduled.get',
+  'scheduled.runs': 'scheduled.runs',
+  'scheduled.tick': 'scheduled.tick',
+  'scheduled.runNow': 'scheduled.runNow',
+  'scheduled.health': 'scheduled.health',
   'system.health': 'system.health',
 }
 

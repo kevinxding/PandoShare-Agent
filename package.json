@@ -160,17 +160,46 @@
     "cloud:job-envelope-smoke": "npm run build -- --pretty false && node scripts/cloud/cloud-job-envelope-smoke.mjs",
     "cloud:artifact-manifest-smoke": "npm run build -- --pretty false && node scripts/cloud/cloud-artifact-manifest-smoke.mjs",
     "cloud:coordinator-smoke": "npm run build -- --pretty false && node scripts/cloud/cloud-coordinator-smoke.mjs",
-    "productization:final-smoke": "npm run build -- --pretty false && node scripts/productization-final-smoke.mjs"
+    "productization:final-smoke": "npm run build -- --pretty false && node scripts/productization-final-smoke.mjs",
+    "tui:shell-smoke": "npm run build -- --pretty false && node scripts/tui-shell-smoke.mjs",
+    "tui:adapter-smoke": "npm run build -- --pretty false && node scripts/tui-adapter-smoke.mjs",
+    "tui:launch-smoke": "npm run build -- --pretty false && node scripts/tui-launch-smoke.mjs",
+    "tui:thread-smoke": "npm run build -- --pretty false && node scripts/tui-thread-smoke.mjs",
+    "tui:approval-smoke": "npm run build -- --pretty false && bun --conditions browser scripts/tui-approval-smoke.mjs",
+    "tui:smoke": "npm run tui:shell-smoke && npm run tui:adapter-smoke && npm run tui:launch-smoke && npm run tui:input-smoke && npm run tui:thread-smoke && npm run tui:approval-smoke",
+    "tui:input-smoke": "npm run build -- --pretty false && bun --conditions browser scripts/tui-input-smoke.mjs",
+    "scheduled:parser-smoke": "npm run build -- --pretty false && node scripts/scheduled-automation-parser-smoke.mjs",
+    "scheduled:store-smoke": "npm run build -- --pretty false && node scripts/scheduled-automation-store-smoke.mjs",
+    "scheduled:runtime-smoke": "npm run build -- --pretty false && node scripts/scheduled-automation-runtime-smoke.mjs",
+    "scheduled:gateway-smoke": "npm run build -- --pretty false && node scripts/scheduled-automation-gateway-smoke.mjs",
+    "scheduled:backend-smoke": "npm run build -- --pretty false && node scripts/scheduled-automation-backend-smoke.mjs",
+    "scheduled:mission-smoke": "npm run build -- --pretty false && node scripts/scheduled-automation-mission-smoke.mjs",
+    "scheduled:replay-smoke": "npm run build -- --pretty false && node scripts/scheduled-automation-replay-smoke.mjs",
+    "scheduled:smoke": "npm run build -- --pretty false && node scripts/scheduled-automation-parser-smoke.mjs && node scripts/scheduled-automation-store-smoke.mjs && node scripts/scheduled-automation-runtime-smoke.mjs && node scripts/scheduled-automation-gateway-smoke.mjs && node scripts/scheduled-automation-backend-smoke.mjs && node scripts/scheduled-automation-mission-smoke.mjs && node scripts/scheduled-automation-replay-smoke.mjs"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "solid-js": "^1.9.3"
+    "solid-js": "^1.9.3",
+    "@opentui/core": "0.3.4",
+    "@opentui/keymap": "0.3.4",
+    "@opentui/solid": "0.3.4",
+    "clipboardy": "4.0.0",
+    "diff": "8.0.2",
+    "fuzzysort": "3.1.0",
+    "opentui-spinner": "0.0.7",
+    "strip-ansi": "7.1.2"
   },
   "devDependencies": {
     "typescript": "5.8.2",
     "vite": "^5.4.11",
     "vite-plugin-solid": "^2.10.2"
+  },
+  "imports": {
+    "#pando-opentui/jsx-runtime": {
+      "types": "./src/tui/opentui/pando-jsx/jsx-runtime.ts",
+      "default": "./dist/src/tui/opentui/pando-jsx/jsx-runtime.js"
+    }
   }
 }

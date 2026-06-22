@@ -1,5 +1,6 @@
 import { createStructuredErrorResult, createTextResult, type ToolDefinition } from '../../Tool.js'
 import { LocalAutomationQueue } from '../../services/automationQueue/index.js'
+import { ScheduledAutomationRuntime } from '../../core/scheduled-automations/index.js'
 import { optionalString, requiredString } from '../shared/index.js'
 
 export const ScheduleCronTool: ToolDefinition = {
@@ -22,14 +23,27 @@ export const ScheduleCronTool: ToolDefinition = {
   },
   async execute(toolUse, context) {
     try {
-      const record = await new LocalAutomationQueue(context.cwd).createSchedule({
-        schedule: requiredString(toolUse.input, 'schedule'),
-        command: requiredString(toolUse.input, 'command'),
-        goalId: optionalString(toolUse.input, 'goalId') ?? metadataString(context, 'goalId'),
-        taskId: optionalString(toolUse.input, 'taskId') ?? metadataString(context, 'taskId'),
-        loopId: optionalString(toolUse.input, 'loopId') ?? metadataString(context, 'loopId'),
-      })
-      return createTextResult(toolUse.id, JSON.stringify(record, null, 2), true, { scheduleId: record.scheduleId })
+      const schedule = requiredString(toolUse.input, 'schedule')
+      const command = requiredString(toolUse.input, 'command')
+      const goalId = optionalString(toolUse.input, 'goalId') ?? metadataString(context, 'goalId')
+      const taskId = optionalString(toolUse.input, 'taskId') ?? metadataString(context, 'taskId')
+      const loopId = optionalString(toolUse.input, 'loopId') ?? metadataString(context, 'loopId')
+      const record = await new LocalAutomationQueue(context.cwd).createSchedule({ schedule, command, goalId, taskId, loopId })
+      let scheduledJobId: string | undefined
+      try {
+        const job = await new ScheduledAutomationRuntime({ workspaceRoot: context.cwd, workspaceId: 'default' }).createJob({
+          title: 'Tool schedule ' + record.scheduleId,
+          schedule,
+          action: { type: 'remote_trigger', payload: { channel: 'schedule_cron', payload: record.command, goalId, taskId, loopId } },
+          delivery: { mode: 'queue_only' },
+          source: 'tool',
+          metadata: { legacyScheduleId: record.scheduleId },
+        })
+        scheduledJobId = job.jobId
+      } catch {
+        scheduledJobId = undefined
+      }
+      return createTextResult(toolUse.id, JSON.stringify({ ...record, scheduledJobId }, null, 2), true, { scheduleId: record.scheduleId, scheduledJobId })
     } catch (error) {
       return createStructuredErrorResult(toolUse.id, error, { toolName: 'schedule_cron' })
     }

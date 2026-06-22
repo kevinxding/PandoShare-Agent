@@ -47,6 +47,7 @@ export type QueryEngineOptions = {
   temperature?: number
   maxToolRounds?: number
   fetch?: GenerateOptions['fetch']
+  stream?: boolean
   requestToolApproval?: ToolApprovalHandler
   onEvent?: AgentEventHandler
   threadId?: string
@@ -248,6 +249,7 @@ export class QueryEngine {
       maxTokens: this.options.maxTokens,
       temperature: this.options.temperature,
       fetch: this.options.fetch,
+      stream: this.options.stream,
       initialMessages,
     })
 
@@ -283,6 +285,7 @@ export class QueryEngine {
       context: this.context,
       agentSession: this.agentSession,
       maxToolRounds: this.maxToolRounds,
+      stream: this.options.stream,
     })
   }
 

@@ -7,6 +7,7 @@ import { LoopRuntime } from '../loop/index.js'
 import { ModelRouter } from '../model/index.js'
 import { createCommandEnvelope } from '../protocol/index.js'
 import { ReplayService } from '../replay/index.js'
+import { ScheduledAutomationRuntime, type ScheduledAutomationRunReason } from '../scheduled-automations/index.js'
 import { asRecord, optionalString, requiredString } from './errors.js'
 import { collectEventIds } from './telemetry.js'
 import type {
@@ -52,7 +53,14 @@ export function createBackendAdapters(options: BackendServiceOptions, context: {
     durable,
   })
   const replay = options.replayService ?? new ReplayService(durable)
-  return { durable, agent, loop, gui, gateway, model, replay }
+  const scheduled = options.scheduledRuntime ?? new ScheduledAutomationRuntime({
+    workspaceRoot: context.workspaceRoot,
+    workspaceId: context.workspaceId,
+    durable,
+    gateway,
+    loopWake: gateway.wakeScheduler,
+  })
+  return { durable, agent, loop, gui, gateway, model, replay, scheduled }
 }
 
 export function createBackendHandlers(): BackendHandlerMap {
@@ -75,6 +83,17 @@ export function createBackendHandlers(): BackendHandlerMap {
     'replay.run': handleReplayRun,
     'replay.loop': handleReplayLoop,
     'replay.export': handleReplayExport,
+    'scheduled.create': handleScheduledCreate,
+    'scheduled.update': handleScheduledUpdate,
+    'scheduled.delete': handleScheduledDelete,
+    'scheduled.pause': handleScheduledPause,
+    'scheduled.resume': handleScheduledResume,
+    'scheduled.list': handleScheduledList,
+    'scheduled.get': handleScheduledGet,
+    'scheduled.runs': handleScheduledRuns,
+    'scheduled.tick': handleScheduledTick,
+    'scheduled.runNow': handleScheduledRunNow,
+    'scheduled.health': handleScheduledHealth,
     'system.health': handleSystemHealth,
     'system.acceptance': handleSystemAcceptance,
   }
@@ -214,10 +233,83 @@ async function handleReplayExport(request: NormalizedBackendRequest, execution: 
   return { data, eventIds: collectEventIds(data) }
 }
 
+async function handleScheduledCreate(request: NormalizedBackendRequest, execution: BackendExecution): Promise<BackendHandlerResult> {
+  const data = await execution.adapters.scheduled.createJob(asRecord(request.payload, 'payload') as Parameters<ScheduledAutomationRuntime['createJob']>[0])
+  return { data, eventIds: collectEventIds(data) }
+}
+
+async function handleScheduledUpdate(request: NormalizedBackendRequest, execution: BackendExecution): Promise<BackendHandlerResult> {
+  const payload = asRecord(request.payload, 'payload')
+  const jobId = requiredString(payload.jobId ?? payload.id, 'payload.jobId')
+  const { jobId: _jobId, id: _id, ...patch } = payload
+  void _jobId
+  void _id
+  const data = await execution.adapters.scheduled.updateJob(jobId, patch as Parameters<ScheduledAutomationRuntime['updateJob']>[1])
+  return { data, eventIds: collectEventIds(data) }
+}
+
+async function handleScheduledDelete(request: NormalizedBackendRequest, execution: BackendExecution): Promise<BackendHandlerResult> {
+  const payload = asRecord(request.payload, 'payload')
+  const data = await execution.adapters.scheduled.deleteJob(requiredString(payload.jobId ?? payload.id, 'payload.jobId'))
+  return { data, eventIds: collectEventIds(data) }
+}
+
+async function handleScheduledPause(request: NormalizedBackendRequest, execution: BackendExecution): Promise<BackendHandlerResult> {
+  const payload = asRecord(request.payload, 'payload')
+  const data = await execution.adapters.scheduled.pauseJob(requiredString(payload.jobId ?? payload.id, 'payload.jobId'))
+  return { data, eventIds: collectEventIds(data) }
+}
+
+async function handleScheduledResume(request: NormalizedBackendRequest, execution: BackendExecution): Promise<BackendHandlerResult> {
+  const payload = asRecord(request.payload, 'payload')
+  const data = await execution.adapters.scheduled.resumeJob(requiredString(payload.jobId ?? payload.id, 'payload.jobId'))
+  return { data, eventIds: collectEventIds(data) }
+}
+
+async function handleScheduledList(request: NormalizedBackendRequest, execution: BackendExecution): Promise<BackendHandlerResult> {
+  const payload = recordOrEmpty(request.payload)
+  const [jobs, legacy] = await Promise.all([
+    execution.adapters.scheduled.listJobs({ status: scheduledStatus(payload.status), includeDeleted: payload.includeDeleted === true, limit: optionalNumber(payload.limit) }),
+    execution.adapters.scheduled.listLegacyScheduleProjections(),
+  ])
+  const data = { jobs, legacy }
+  return { data, eventIds: collectEventIds(data) }
+}
+
+async function handleScheduledGet(request: NormalizedBackendRequest, execution: BackendExecution): Promise<BackendHandlerResult> {
+  const payload = asRecord(request.payload, 'payload')
+  const data = await execution.adapters.scheduled.getJob(requiredString(payload.jobId ?? payload.id, 'payload.jobId'))
+  return { data, eventIds: collectEventIds(data) }
+}
+
+async function handleScheduledRuns(request: NormalizedBackendRequest, execution: BackendExecution): Promise<BackendHandlerResult> {
+  const payload = recordOrEmpty(request.payload)
+  const data = await execution.adapters.scheduled.listRuns({ jobId: optionalString(payload.jobId ?? payload.id), limit: optionalNumber(payload.limit) })
+  return { data, eventIds: collectEventIds(data) }
+}
+
+async function handleScheduledTick(request: NormalizedBackendRequest, execution: BackendExecution): Promise<BackendHandlerResult> {
+  const payload = recordOrEmpty(request.payload)
+  const data = await execution.adapters.scheduled.tick({ nowMs: optionalNumber(payload.nowMs), maxJobs: optionalNumber(payload.maxJobs) })
+  return { data, eventIds: collectEventIds(data) }
+}
+
+async function handleScheduledRunNow(request: NormalizedBackendRequest, execution: BackendExecution): Promise<BackendHandlerResult> {
+  const payload = asRecord(request.payload, 'payload')
+  const data = await execution.adapters.scheduled.runJobNow(requiredString(payload.jobId ?? payload.id, 'payload.jobId'), scheduledReason(payload.reason))
+  return { data, eventIds: collectEventIds(data) }
+}
+
+async function handleScheduledHealth(_request: NormalizedBackendRequest, execution: BackendExecution): Promise<BackendHandlerResult> {
+  const data = await execution.adapters.scheduled.health()
+  return { data, eventIds: collectEventIds(data) }
+}
+
 async function handleSystemHealth(_request: NormalizedBackendRequest, execution: BackendExecution): Promise<BackendHandlerResult> {
-  const [maintenance, gateway] = await Promise.all([
+  const [maintenance, gateway, scheduled] = await Promise.all([
     execution.adapters.durable.createMaintenanceReport(),
     execution.adapters.gateway.status().catch(error => ({ ok: false, message: error instanceof Error ? error.message : String(error) })),
+    execution.adapters.scheduled.health().catch(error => ({ ok: false, message: error instanceof Error ? error.message : String(error) })),
   ])
   const data = {
     ok: true,
@@ -234,6 +326,7 @@ async function handleSystemHealth(_request: NormalizedBackendRequest, execution:
         health: execution.adapters.model.readHealth(),
       },
       replay: 'configured',
+      scheduled,
     },
     maintenance,
   }
@@ -299,4 +392,17 @@ function replayScope(value: unknown, fallback: 'run' | 'loop'): 'run' | 'thread'
 function replayCaller(value: unknown): 'server' | 'gateway' | 'cli' | 'test' | 'maintenance' {
   if (value === 'server' || value === 'gateway' || value === 'cli' || value === 'test' || value === 'maintenance') return value
   return 'server'
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function scheduledStatus(value: unknown): 'active' | 'paused' | 'deleted' | undefined {
+  return value === 'active' || value === 'paused' || value === 'deleted' ? value : undefined
+}
+
+function scheduledReason(value: unknown): ScheduledAutomationRunReason {
+  if (value === 'scheduled' || value === 'manual' || value === 'context_limit' || value === 'retry_after_failure' || value === 'system') return value
+  return 'manual'
 }

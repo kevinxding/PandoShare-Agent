@@ -570,6 +570,59 @@ async function handleMissionControlRequest(
       sendJson(response, 200, service.getReplaySummary(queryFromUrl(url)))
       return
     }
+    if (method === 'GET' && url.pathname === '/api/mission-control/scheduled') {
+      sendJson(response, 200, await service.getScheduledJobs(queryFromUrl(url)))
+      return
+    }
+    if (method === 'GET' && url.pathname === '/api/mission-control/scheduled/health') {
+      sendJson(response, 200, await service.getScheduledHealth())
+      return
+    }
+    if (method === 'POST' && url.pathname === '/api/mission-control/scheduled') {
+      const body = await readJsonBody(request)
+      sendJson(response, 200, await service.runScheduledAction({ action: 'scheduled.create', payload: isRecord(body) ? body : {} }))
+      return
+    }
+    if (method === 'POST' && url.pathname === '/api/mission-control/scheduled/tick') {
+      const body = await readJsonBody(request)
+      sendJson(response, 200, await service.runScheduledAction({ action: 'scheduled.tick', payload: isRecord(body) ? body : {} }))
+      return
+    }
+    const scheduledRunsMatch = url.pathname.match(/^\/api\/mission-control\/scheduled\/([A-Za-z0-9_-]+)\/runs$/)
+    if (method === 'GET' && scheduledRunsMatch) {
+      sendJson(response, 200, await service.getScheduledRuns({ ...queryFromUrl(url), jobId: scheduledRunsMatch[1]! }))
+      return
+    }
+    const scheduledRunMatch = url.pathname.match(/^\/api\/mission-control\/scheduled\/([A-Za-z0-9_-]+)\/run$/)
+    if (method === 'POST' && scheduledRunMatch) {
+      const body = await readJsonBody(request)
+      sendJson(response, 200, await service.runScheduledAction({ action: 'scheduled.runNow', payload: { ...(isRecord(body) ? body : {}), jobId: scheduledRunMatch[1]! } }))
+      return
+    }
+    const scheduledPauseMatch = url.pathname.match(/^\/api\/mission-control\/scheduled\/([A-Za-z0-9_-]+)\/pause$/)
+    if (method === 'POST' && scheduledPauseMatch) {
+      sendJson(response, 200, await service.runScheduledAction({ action: 'scheduled.pause', payload: { jobId: scheduledPauseMatch[1]! } }))
+      return
+    }
+    const scheduledResumeMatch = url.pathname.match(/^\/api\/mission-control\/scheduled\/([A-Za-z0-9_-]+)\/resume$/)
+    if (method === 'POST' && scheduledResumeMatch) {
+      sendJson(response, 200, await service.runScheduledAction({ action: 'scheduled.resume', payload: { jobId: scheduledResumeMatch[1]! } }))
+      return
+    }
+    const scheduledJobMatch = url.pathname.match(/^\/api\/mission-control\/scheduled\/([A-Za-z0-9_-]+)$/)
+    if (method === 'GET' && scheduledJobMatch) {
+      sendJson(response, 200, await service.getScheduledJob(scheduledJobMatch[1]!))
+      return
+    }
+    if (method === 'PATCH' && scheduledJobMatch) {
+      const body = await readJsonBody(request)
+      sendJson(response, 200, await service.runScheduledAction({ action: 'scheduled.update', payload: { ...(isRecord(body) ? body : {}), jobId: scheduledJobMatch[1]! } }))
+      return
+    }
+    if (method === 'DELETE' && scheduledJobMatch) {
+      sendJson(response, 200, await service.runScheduledAction({ action: 'scheduled.delete', payload: { jobId: scheduledJobMatch[1]! } }))
+      return
+    }
     if (method === 'GET' && url.pathname === '/api/mission-control/approvals') {
       sendJson(response, 200, service.getApprovals(queryFromUrl(url)))
       return

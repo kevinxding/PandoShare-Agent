@@ -6,6 +6,7 @@ import type { LoopRuntime } from '../loop/index.js'
 import type { ModelRouter } from '../model/index.js'
 import type { CommandSource } from '../protocol/index.js'
 import type { ReplayService } from '../replay/index.js'
+import type { ScheduledAutomationRuntime } from '../scheduled-automations/index.js'
 import type { ProjectConfig } from '../../services/config/index.js'
 
 export const BACKEND_ACTIONS = [
@@ -27,6 +28,17 @@ export const BACKEND_ACTIONS = [
   'replay.run',
   'replay.loop',
   'replay.export',
+  'scheduled.create',
+  'scheduled.update',
+  'scheduled.delete',
+  'scheduled.pause',
+  'scheduled.resume',
+  'scheduled.list',
+  'scheduled.get',
+  'scheduled.runs',
+  'scheduled.tick',
+  'scheduled.runNow',
+  'scheduled.health',
   'system.health',
   'system.acceptance',
 ] as const
@@ -117,6 +129,7 @@ export type BackendAdapters = {
   gateway: GatewayDaemon
   model: ModelRouter
   replay: ReplayService
+  scheduled: ScheduledAutomationRuntime
 }
 
 export type BackendExecution = {
@@ -140,6 +153,7 @@ export type BackendServiceOptions = {
   gatewayDaemon?: GatewayDaemon
   modelRouter?: ModelRouter
   replayService?: ReplayService
+  scheduledRuntime?: ScheduledAutomationRuntime
 }
 
 export function isBackendAction(value: string): value is BackendAction {

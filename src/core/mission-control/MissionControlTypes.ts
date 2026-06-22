@@ -11,6 +11,17 @@ export type MissionControlAction =
   | 'gui.reject'
   | 'model.route'
   | 'replay.export'
+  | 'scheduled.create'
+  | 'scheduled.update'
+  | 'scheduled.delete'
+  | 'scheduled.pause'
+  | 'scheduled.resume'
+  | 'scheduled.list'
+  | 'scheduled.get'
+  | 'scheduled.runs'
+  | 'scheduled.tick'
+  | 'scheduled.runNow'
+  | 'scheduled.health'
   | 'system.health'
 
 export type MissionControlOptions = {

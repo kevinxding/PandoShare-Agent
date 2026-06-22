@@ -9,6 +9,7 @@ export type QueryTurnInput = {
   context: ToolUseContext
   agentSession?: AgentSession
   maxToolRounds?: number
+  stream?: boolean
 }
 
 export type QueryTurnOutput = {
@@ -25,6 +26,7 @@ export async function runQueryTurn(input: QueryTurnInput): Promise<QueryTurnOutp
       toolContext: input.context,
       maxToolRounds: input.maxToolRounds,
       abortSignal: input.context.abortSignal,
+      stream: input.stream,
     })
     return {
       finalText: agent.finalText,

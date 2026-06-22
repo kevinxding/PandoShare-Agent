@@ -5,7 +5,7 @@ export type ReplayTimelineItem = {
   seq: number
   eventType: string
   createdAtMs: number
-  category: 'run' | 'model' | 'tool' | 'approval' | 'gui' | 'loop' | 'gateway' | 'checkpoint' | 'heartbeat' | 'other'
+  category: 'run' | 'model' | 'tool' | 'approval' | 'gui' | 'loop' | 'gateway' | 'scheduled' | 'checkpoint' | 'heartbeat' | 'other'
   warning?: string
   payload: unknown
 }
@@ -34,6 +34,7 @@ function categoryForEvent(eventType: string): ReplayTimelineItem['category'] {
   if (eventType.startsWith('gui_')) return 'gui'
   if (eventType.startsWith('loop_')) return 'loop'
   if (eventType.startsWith('gateway_')) return 'gateway'
+  if (eventType.startsWith('scheduled_')) return 'scheduled'
   if (eventType === 'checkpoint') return 'checkpoint'
   if (eventType === 'heartbeat') return 'heartbeat'
   return 'other'
