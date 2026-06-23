@@ -16,6 +16,7 @@ const startedAtMs = Date.now()
 const runId = options.runId ?? `stability_${startedAtMs}_${shortId()}`
 const evidenceRoot = resolve(root, '.pandoshare/stability', runId)
 const workspaceRoot = resolve(root, '.tmp-stability-workspaces', runId)
+const staticRoot = resolve(workspaceRoot, 'static')
 const configPath = resolve(workspaceRoot, 'pandoshare.config.json')
 const ledgerPath = resolve(evidenceRoot, 'ledger.jsonl')
 const summaryPath = resolve(evidenceRoot, 'summary.json')
@@ -23,9 +24,11 @@ const reportPath = resolve(evidenceRoot, 'report.md')
 
 assertInside(root, evidenceRoot)
 assertInside(root, workspaceRoot)
+assertInside(root, staticRoot)
 await mkdir(evidenceRoot, { recursive: true })
 await rm(workspaceRoot, { recursive: true, force: true })
-await mkdir(workspaceRoot, { recursive: true })
+await mkdir(staticRoot, { recursive: true })
+await writeFile(resolve(staticRoot, 'index.html'), '<!doctype html><title>Pando stability</title><div id="root"></div>', 'utf8')
 
 const summary = {
   runId,
@@ -80,7 +83,7 @@ try {
     cwd: workspaceRoot,
     configPath,
     port: 0,
-    staticRoot: resolve(root, 'web/dist'),
+    staticRoot,
   })
   await appendLedger('web_started', { url: pando.url })
 

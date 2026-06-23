@@ -8,9 +8,12 @@ const { GatewayRuntime, LocalGatewayStore } = await import('../dist/src/services
 
 const root = process.cwd()
 const smokeRoot = resolve(root, '.tmp-approval-web-smoke')
+const staticRoot = resolve(smokeRoot, 'static')
 assertInside(root, smokeRoot)
+assertInside(root, staticRoot)
 await rm(smokeRoot, { recursive: true, force: true })
-await mkdir(smokeRoot, { recursive: true })
+await mkdir(staticRoot, { recursive: true })
+await writeFile(resolve(staticRoot, 'index.html'), '<!doctype html><title>Pando smoke</title><div id="root"></div>', 'utf8')
 
 let llm
 let pando
@@ -23,7 +26,7 @@ try {
     cwd: smokeRoot,
     configPath,
     port: 0,
-    staticRoot: resolve(root, 'web/dist'),
+    staticRoot,
   })
 
   const approvedThread = await postJson(`${pando.url}/api/threads`, { title: 'Approval approve smoke' })

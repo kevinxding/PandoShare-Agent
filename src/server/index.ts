@@ -1105,7 +1105,6 @@ function parseAcceptanceOnly(value: unknown): string[] {
     'typecheck',
     'build',
     'check',
-    'web-build',
     'cli-entry-smoke',
     'doctor-smoke',
     'model-smoke',
@@ -2128,6 +2127,7 @@ async function handleChatRequest(
     sendJson(response, 400, { ok: false, error: 'prompt must be a non-empty string' })
     return
   }
+  const streaming = body.stream === true
 
   const store = new LocalThreadStore(runtime.cwd)
   const sessionId = `web-${Date.now()}`
@@ -2163,6 +2163,7 @@ async function handleChatRequest(
     threadId,
     goalId,
     fetch: runtime.fetch,
+    stream: streaming,
     requestToolApproval: requestWebApproval(runtime, threadId),
     onEvent: createWebEventHandler(runtime.broker, threadId),
     metadata: {
@@ -2174,6 +2175,61 @@ async function handleChatRequest(
     threadId,
     abort: () => engine.abort('server run aborted'),
   })
+
+  if (streaming) {
+    sendJson(response, 202, { ok: true, streaming: true, threadId, runId: sessionId })
+    void (async () => {
+      try {
+        await maybeRenameFreshThread(store, threadId, prompt)
+        const result = await engine.submitMessage(prompt)
+        if (goalId && goalStore) {
+          await goalStore.appendRun(goalId, {
+            runId: sessionId,
+            kind: 'thread',
+            status: 'completed',
+            startedAtMs: Date.now(),
+            completedAtMs: Date.now(),
+            threadId,
+            summary: 'Web chat run completed.',
+          })
+          await goalStore.appendEvidence(goalId, {
+            type: 'thread',
+            strength: 'indirect',
+            summary: previewText(result.finalText, 300),
+            threadId,
+          })
+        }
+        runtime.broker.publish(threadId, {
+          type: 'web_chat_completed',
+          threadId,
+          sessionId,
+          createdAtMs: Date.now(),
+        })
+      } catch (error) {
+        if (goalId && goalStore) {
+          await goalStore.appendRun(goalId, {
+            runId: sessionId,
+            kind: 'thread',
+            status: 'failed',
+            startedAtMs: Date.now(),
+            completedAtMs: Date.now(),
+            threadId,
+            summary: errorMessage(error),
+          })
+        }
+        runtime.broker.publish(threadId, {
+          type: 'web_chat_failed',
+          threadId,
+          sessionId,
+          error: errorMessage(error),
+          createdAtMs: Date.now(),
+        })
+      } finally {
+        runtime.activeRuns.delete(threadId)
+      }
+    })()
+    return
+  }
 
   try {
     await maybeRenameFreshThread(store, threadId, prompt)
@@ -2605,7 +2661,7 @@ async function serveStatic(response: ServerResponse, staticRoot: string, pathnam
       sendText(
         response,
         200,
-        '<!doctype html><title>Pando</title><h1>Pando web GUI is not built</h1><p>Run npm run web:build, then start pando serve again.</p>',
+        '<!doctype html><title>Pando</title><h1>Pando web GUI is not configured</h1><p>Run npm run client-ui:build, then start pando serve again. Use --static-root only when serving a custom Web UI dist.</p>',
         'text/html; charset=utf-8',
       )
     }
@@ -2931,7 +2987,8 @@ function openBrowser(url: string): void {
 }
 
 function defaultStaticRoot(): string {
-  return resolve(defaultPackageRoot(), 'web', 'dist')
+  const configured = runtimeEnv('PANDO_WEB_STATIC_ROOT')
+  return configured ? resolve(configured) : resolve(defaultPackageRoot(), 'client-ui', 'dist')
 }
 
 function defaultPackageRoot(): string {

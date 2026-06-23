@@ -3,10 +3,10 @@
     "id": "pandoshare-agent@0.1.0",
     "name": "pandoshare-agent",
     "version": "0.1.0",
-    "size": 570877,
-    "unpackedSize": 2716148,
-    "shasum": "7a58813565c2002b91cf60a5304f08453ce7d202",
-    "integrity": "sha512-Ne2gcc2boPYDZj83q/ewfmBvhNc5higCa4B4nFY73Sy2d0ZmEdC1y42KrOJ/2BCnj+1t1KAMZp9vAa4Pjpyv5A==",
+    "size": 1208850,
+    "unpackedSize": 3757362,
+    "shasum": "0f726cdf3a515574f0aca8b49e91f11637b77718",
+    "integrity": "sha512-g/5uTR8r8mSmcT1UjTDtTL10xOeScBi8JRBXgPY1ozAauodzRMmIzuC0A1yDGIpGZENbEX841vkqxnU6hD12aA==",
     "filename": "pandoshare-agent-0.1.0.tgz",
     "files": [
       {
@@ -51,12 +51,12 @@
       },
       {
         "path": "NOTICE.md",
-        "size": 623,
+        "size": 1506,
         "mode": 420
       },
       {
         "path": "README.md",
-        "size": 7744,
+        "size": 7884,
         "mode": 420
       },
       {
@@ -66,7 +66,7 @@
       },
       {
         "path": "THIRD_PARTY.md",
-        "size": 327,
+        "size": 857,
         "mode": 420
       },
       {
@@ -176,7 +176,222 @@
       },
       {
         "path": "bin/pando.js",
-        "size": 60,
+        "size": 2384,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/BACKEND_AGENT_INTEGRATION.md",
+        "size": 16493,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/eslint.config.js",
+        "size": 591,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/index.html",
+        "size": 372,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/package-lock.json",
+        "size": 162321,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/package.json",
+        "size": 987,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/public/favicon.svg",
+        "size": 9522,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/public/icons.svg",
+        "size": 5031,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/README.md",
+        "size": 2425,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/scripts/serve-local-preview.mjs",
+        "size": 3128,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/build.rs",
+        "size": 40,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/capabilities/default.json",
+        "size": 218,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/Cargo.toml",
+        "size": 559,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/32x32.png",
+        "size": 2225,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/128x128.png",
+        "size": 11059,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/128x128@2x.png",
+        "size": 23137,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/icon.icns",
+        "size": 277003,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/icon.ico",
+        "size": 37710,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/icon.png",
+        "size": 49979,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/Square30x30Logo.png",
+        "size": 2078,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/Square44x44Logo.png",
+        "size": 3419,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/Square71x71Logo.png",
+        "size": 6027,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/Square89x89Logo.png",
+        "size": 7551,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/Square107x107Logo.png",
+        "size": 9202,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/Square142x142Logo.png",
+        "size": 12530,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/Square150x150Logo.png",
+        "size": 13032,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/Square284x284Logo.png",
+        "size": 25943,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/Square310x310Logo.png",
+        "size": 28507,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/icons/StoreLogo.png",
+        "size": 3971,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/src/lib.rs",
+        "size": 433,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/src/main.rs",
+        "size": 183,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src-tauri/tauri.conf.json",
+        "size": 908,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src/App.css",
+        "size": 65681,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src/App.tsx",
+        "size": 89393,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src/assets/hero.png",
+        "size": 13057,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src/assets/react.svg",
+        "size": 4126,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src/assets/vite.svg",
+        "size": 8709,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src/backendApi.ts",
+        "size": 24335,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src/index.css",
+        "size": 968,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/src/main.tsx",
+        "size": 230,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/tsconfig.app.json",
+        "size": 617,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/tsconfig.json",
+        "size": 119,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/tsconfig.node.json",
+        "size": 591,
+        "mode": 420
+      },
+      {
+        "path": "client-ui/vite.config.ts",
+        "size": 526,
         "mode": 420
       },
       {
@@ -201,12 +416,12 @@
       },
       {
         "path": "docs/chaos/latest-smoke-report.json",
-        "size": 1558,
+        "size": 1623,
         "mode": 420
       },
       {
         "path": "docs/chaos/latest-smoke-report.md",
-        "size": 601,
+        "size": 617,
         "mode": 420
       },
       {
@@ -296,7 +511,12 @@
       },
       {
         "path": "docs/github-publish.md",
-        "size": 1594,
+        "size": 1723,
+        "mode": 420
+      },
+      {
+        "path": "docs/heartbeat/scheduled-task-center.md",
+        "size": 813,
         "mode": 420
       },
       {
@@ -326,12 +546,12 @@
       },
       {
         "path": "docs/kernel/generated-acceptance-report.json",
-        "size": 36023,
+        "size": 45358,
         "mode": 420
       },
       {
         "path": "docs/kernel/generated-acceptance-report.md",
-        "size": 6292,
+        "size": 7618,
         "mode": 420
       },
       {
@@ -351,7 +571,7 @@
       },
       {
         "path": "docs/kernel/migration-plan.md",
-        "size": 10672,
+        "size": 10751,
         "mode": 420
       },
       {
@@ -361,7 +581,7 @@
       },
       {
         "path": "docs/kernel/productization-roadmap.md",
-        "size": 3869,
+        "size": 4130,
         "mode": 420
       },
       {
@@ -382,6 +602,11 @@
       {
         "path": "docs/mission-control/backend-api-contract.md",
         "size": 956,
+        "mode": 420
+      },
+      {
+        "path": "docs/mission-control/scheduled-automations-api.md",
+        "size": 1034,
         "mode": 420
       },
       {
@@ -411,7 +636,7 @@
       },
       {
         "path": "docs/productization/final-16-phase-summary.md",
-        "size": 1131,
+        "size": 1702,
         "mode": 420
       },
       {
@@ -435,6 +660,11 @@
         "mode": 420
       },
       {
+        "path": "docs/productization/pando-tui-shell.md",
+        "size": 2437,
+        "mode": 420
+      },
+      {
         "path": "docs/productization/phase-2-to-6-summary.md",
         "size": 959,
         "mode": 420
@@ -442,6 +672,11 @@
       {
         "path": "docs/productization/replay-golden-traces.md",
         "size": 2609,
+        "mode": 420
+      },
+      {
+        "path": "docs/productization/scheduled-automations.md",
+        "size": 1315,
         "mode": 420
       },
       {
@@ -471,7 +706,7 @@
       },
       {
         "path": "docs/release/artifact-manifest.json",
-        "size": 295,
+        "size": 309,
         "mode": 420
       },
       {
@@ -481,7 +716,7 @@
       },
       {
         "path": "docs/release/generated-release-notes.md",
-        "size": 264,
+        "size": 272,
         "mode": 420
       },
       {
@@ -491,7 +726,7 @@
       },
       {
         "path": "docs/release/package-smoke.json",
-        "size": 82553,
+        "size": 91792,
         "mode": 420
       },
       {
@@ -510,6 +745,11 @@
         "mode": 420
       },
       {
+        "path": "docs/replay/scheduled-automation-events.md",
+        "size": 622,
+        "mode": 420
+      },
+      {
         "path": "docs/security/clean-room-policy.md",
         "size": 323,
         "mode": 420
@@ -521,7 +761,7 @@
       },
       {
         "path": "docs/security/generated-security-acceptance-report.json",
-        "size": 11508,
+        "size": 11823,
         "mode": 420
       },
       {
@@ -541,7 +781,7 @@
       },
       {
         "path": "docs/security/security-acceptance-report.md",
-        "size": 691,
+        "size": 719,
         "mode": 420
       },
       {
@@ -551,7 +791,7 @@
       },
       {
         "path": "docs/teacher-map.md",
-        "size": 5272,
+        "size": 5338,
         "mode": 420
       },
       {
@@ -736,7 +976,7 @@
       },
       {
         "path": "package.json",
-        "size": 15940,
+        "size": 18219,
         "mode": 420
       },
       {
@@ -746,7 +986,7 @@
       },
       {
         "path": "scripts/acceptance-smoke.mjs",
-        "size": 14267,
+        "size": 14219,
         "mode": 420
       },
       {
@@ -766,7 +1006,7 @@
       },
       {
         "path": "scripts/approval-web-smoke.mjs",
-        "size": 9996,
+        "size": 10174,
         "mode": 420
       },
       {
@@ -921,7 +1161,7 @@
       },
       {
         "path": "scripts/delivery-report.mjs",
-        "size": 16488,
+        "size": 16407,
         "mode": 420
       },
       {
@@ -1006,7 +1246,7 @@
       },
       {
         "path": "scripts/generate-acceptance-report.mjs",
-        "size": 13111,
+        "size": 13431,
         "mode": 420
       },
       {
@@ -1221,7 +1461,7 @@
       },
       {
         "path": "scripts/reality-docs-smoke.mjs",
-        "size": 5169,
+        "size": 5196,
         "mode": 420
       },
       {
@@ -1320,6 +1560,41 @@
         "mode": 420
       },
       {
+        "path": "scripts/scheduled-automation-backend-smoke.mjs",
+        "size": 1833,
+        "mode": 420
+      },
+      {
+        "path": "scripts/scheduled-automation-gateway-smoke.mjs",
+        "size": 1722,
+        "mode": 420
+      },
+      {
+        "path": "scripts/scheduled-automation-mission-smoke.mjs",
+        "size": 1828,
+        "mode": 420
+      },
+      {
+        "path": "scripts/scheduled-automation-parser-smoke.mjs",
+        "size": 923,
+        "mode": 420
+      },
+      {
+        "path": "scripts/scheduled-automation-replay-smoke.mjs",
+        "size": 1541,
+        "mode": 420
+      },
+      {
+        "path": "scripts/scheduled-automation-runtime-smoke.mjs",
+        "size": 1861,
+        "mode": 420
+      },
+      {
+        "path": "scripts/scheduled-automation-store-smoke.mjs",
+        "size": 2096,
+        "mode": 420
+      },
+      {
         "path": "scripts/security-boundary-smoke.mjs",
         "size": 517,
         "mode": 420
@@ -1346,7 +1621,7 @@
       },
       {
         "path": "scripts/stability-runner.mjs",
-        "size": 32008,
+        "size": 32190,
         "mode": 420
       },
       {
@@ -1385,8 +1660,33 @@
         "mode": 420
       },
       {
-        "path": "scripts/web-build-smoke.mjs",
-        "size": 5897,
+        "path": "scripts/tui-adapter-smoke.mjs",
+        "size": 2757,
+        "mode": 420
+      },
+      {
+        "path": "scripts/tui-approval-smoke.mjs",
+        "size": 4284,
+        "mode": 420
+      },
+      {
+        "path": "scripts/tui-input-smoke.mjs",
+        "size": 28299,
+        "mode": 420
+      },
+      {
+        "path": "scripts/tui-launch-smoke.mjs",
+        "size": 1218,
+        "mode": 420
+      },
+      {
+        "path": "scripts/tui-shell-smoke.mjs",
+        "size": 904,
+        "mode": 420
+      },
+      {
+        "path": "scripts/tui-thread-smoke.mjs",
+        "size": 982,
         "mode": 420
       },
       {
@@ -1501,7 +1801,7 @@
       },
       {
         "path": "src/core/backend/adapters.ts",
-        "size": 13723,
+        "size": 19610,
         "mode": 420
       },
       {
@@ -1566,7 +1866,7 @@
       },
       {
         "path": "src/core/backend/types.ts",
-        "size": 3541,
+        "size": 3945,
         "mode": 420
       },
       {
@@ -1921,7 +2221,7 @@
       },
       {
         "path": "src/core/gateway-daemon-service/GatewayServiceConfig.ts",
-        "size": 1694,
+        "size": 1980,
         "mode": 420
       },
       {
@@ -1931,7 +2231,7 @@
       },
       {
         "path": "src/core/gateway-daemon-service/GatewayServiceRuntime.ts",
-        "size": 5401,
+        "size": 6601,
         "mode": 420
       },
       {
@@ -2126,7 +2426,7 @@
       },
       {
         "path": "src/core/index.ts",
-        "size": 1083,
+        "size": 1132,
         "mode": 420
       },
       {
@@ -2301,7 +2601,7 @@
       },
       {
         "path": "src/core/mission-control/MissionControlActions.ts",
-        "size": 1074,
+        "size": 1516,
         "mode": 420
       },
       {
@@ -2326,12 +2626,12 @@
       },
       {
         "path": "src/core/mission-control/MissionControlService.ts",
-        "size": 4604,
+        "size": 5907,
         "mode": 420
       },
       {
         "path": "src/core/mission-control/MissionControlTypes.ts",
-        "size": 2053,
+        "size": 2296,
         "mode": 420
       },
       {
@@ -2541,7 +2841,7 @@
       },
       {
         "path": "src/core/replay/EventReplay.ts",
-        "size": 1585,
+        "size": 1660,
         "mode": 420
       },
       {
@@ -2657,6 +2957,56 @@
       {
         "path": "src/core/sandbox/SandboxViolation.ts",
         "size": 363,
+        "mode": 420
+      },
+      {
+        "path": "src/core/scheduled-automations/index.ts",
+        "size": 424,
+        "mode": 420
+      },
+      {
+        "path": "src/core/scheduled-automations/ScheduledAutomationEvents.ts",
+        "size": 1480,
+        "mode": 420
+      },
+      {
+        "path": "src/core/scheduled-automations/ScheduledAutomationExecutor.ts",
+        "size": 5626,
+        "mode": 420
+      },
+      {
+        "path": "src/core/scheduled-automations/ScheduledAutomationHistory.ts",
+        "size": 339,
+        "mode": 420
+      },
+      {
+        "path": "src/core/scheduled-automations/ScheduledAutomationProjector.ts",
+        "size": 554,
+        "mode": 420
+      },
+      {
+        "path": "src/core/scheduled-automations/ScheduledAutomationRedaction.ts",
+        "size": 1067,
+        "mode": 420
+      },
+      {
+        "path": "src/core/scheduled-automations/ScheduledAutomationRuntime.ts",
+        "size": 10881,
+        "mode": 420
+      },
+      {
+        "path": "src/core/scheduled-automations/ScheduledAutomationStore.ts",
+        "size": 11361,
+        "mode": 420
+      },
+      {
+        "path": "src/core/scheduled-automations/ScheduledAutomationTypes.ts",
+        "size": 3591,
+        "mode": 420
+      },
+      {
+        "path": "src/core/scheduled-automations/ScheduleParser.ts",
+        "size": 6349,
         "mode": 420
       },
       {
@@ -2821,7 +3171,7 @@
       },
       {
         "path": "src/entrypoints/cli.ts",
-        "size": 2853,
+        "size": 3188,
         "mode": 420
       },
       {
@@ -2886,7 +3236,7 @@
       },
       {
         "path": "src/main.tsx",
-        "size": 72673,
+        "size": 77312,
         "mode": 420
       },
       {
@@ -2926,7 +3276,7 @@
       },
       {
         "path": "src/query.ts",
-        "size": 1260,
+        "size": 1307,
         "mode": 420
       },
       {
@@ -2936,7 +3286,7 @@
       },
       {
         "path": "src/QueryEngine.ts",
-        "size": 22261,
+        "size": 22350,
         "mode": 420
       },
       {
@@ -2961,12 +3311,12 @@
       },
       {
         "path": "src/server/index.ts",
-        "size": 102744,
+        "size": 107621,
         "mode": 420
       },
       {
         "path": "src/services/agent/index.ts",
-        "size": 13430,
+        "size": 13652,
         "mode": 420
       },
       {
@@ -3456,7 +3806,7 @@
       },
       {
         "path": "src/tools/ScheduleCronTool/index.ts",
-        "size": 1865,
+        "size": 2674,
         "mode": 420
       },
       {
@@ -3547,6 +3897,66 @@
       {
         "path": "src/tools/WebSearchTool/index.ts",
         "size": 4261,
+        "mode": 420
+      },
+      {
+        "path": "src/tui/index.ts",
+        "size": 145,
+        "mode": 420
+      },
+      {
+        "path": "src/tui/opentui/pando-jsx/jsx-runtime.ts",
+        "size": 1525,
+        "mode": 420
+      },
+      {
+        "path": "src/tui/opentui/PandoCommandPalette.tsx",
+        "size": 1866,
+        "mode": 420
+      },
+      {
+        "path": "src/tui/opentui/PandoCommands.ts",
+        "size": 10982,
+        "mode": 420
+      },
+      {
+        "path": "src/tui/opentui/PandoDialogSelect.tsx",
+        "size": 10379,
+        "mode": 420
+      },
+      {
+        "path": "src/tui/opentui/PandoKeymap.ts",
+        "size": 6183,
+        "mode": 420
+      },
+      {
+        "path": "src/tui/opentui/PandoOpenTuiRenderer.tsx",
+        "size": 130859,
+        "mode": 420
+      },
+      {
+        "path": "src/tui/opentui/PandoPrompt.tsx",
+        "size": 7496,
+        "mode": 420
+      },
+      {
+        "path": "src/tui/PandoTuiAdapter.ts",
+        "size": 21170,
+        "mode": 420
+      },
+      {
+        "path": "src/tui/PandoTuiLauncher.ts",
+        "size": 962,
+        "mode": 420
+      },
+      {
+        "path": "src/tui/PandoTuiShell.ts",
+        "size": 4493,
+        "mode": 420
+      },
+      {
+        "path": "src/tui/PandoTuiTypes.ts",
+        "size": 3246,
         "mode": 420
       },
       {
@@ -3663,34 +4073,9 @@
         "path": "vendor/README.md",
         "size": 98,
         "mode": 420
-      },
-      {
-        "path": "web/index.html",
-        "size": 297,
-        "mode": 420
-      },
-      {
-        "path": "web/OPENCODE_MIT_ATTRIBUTION.txt",
-        "size": 2152,
-        "mode": 420
-      },
-      {
-        "path": "web/src/App.tsx",
-        "size": 173769,
-        "mode": 420
-      },
-      {
-        "path": "web/src/styles.css",
-        "size": 47943,
-        "mode": 420
-      },
-      {
-        "path": "web/vite.config.ts",
-        "size": 204,
-        "mode": 420
       }
     ],
-    "entryCount": 736,
+    "entryCount": 813,
     "bundled": []
   }
 ]

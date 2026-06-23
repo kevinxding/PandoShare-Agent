@@ -367,6 +367,7 @@ type ParsedArgs =
       configPath?: string
       host?: string
       port?: number
+      staticRoot?: string
       open: boolean
     }
   | GoalCommandArgs
@@ -982,6 +983,7 @@ function parseServeCommand(argv: readonly string[]): Extract<ParsedArgs, { kind:
   const common = parseCommonOptions(argv)
   let host: string | undefined
   let port: number | undefined
+  let staticRoot: string | undefined
   let open = false
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -1001,6 +1003,10 @@ function parseServeCommand(argv: readonly string[]): Extract<ParsedArgs, { kind:
         index += 1
         break
       }
+      case '--static-root':
+        staticRoot = requiredArg(argv[index + 1], '--static-root requires a path')
+        index += 1
+        break
       case '--open':
         open = true
         break
@@ -1014,6 +1020,7 @@ function parseServeCommand(argv: readonly string[]): Extract<ParsedArgs, { kind:
     configPath: common.configPath,
     host,
     port,
+    staticRoot,
     open,
   }
 }
@@ -1293,6 +1300,7 @@ async function runServeCommand(args: Extract<ParsedArgs, { kind: 'serve' }>, run
     configPath: args.configPath,
     host: args.host,
     port: args.port,
+    staticRoot: args.staticRoot ? (isAbsolute(args.staticRoot) ? args.staticRoot : resolve(runtimeProcess.cwd(), args.staticRoot)) : undefined,
     open: args.open,
     stdout: runtimeProcess.stdout,
   })

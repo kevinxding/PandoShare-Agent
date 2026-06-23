@@ -9,6 +9,7 @@ The project uses English and ASCII file names, program identifiers, config keys,
 ```bash
 node bin/pando.js --help
 node bin/pando.js doctor
+npm run client-ui:build
 node bin/pando.js serve
 node bin/pando.js "Reply with exactly: PANDO_OK"
 node bin/pando.js exec "Inspect this workspace"
@@ -25,7 +26,7 @@ After package linking or installation, the same commands are available as `pando
 
 ## Core Capabilities
 
-- Web UI: chat, threads, model settings, tools/events, approvals, GUI status, Loop Engineering, Gateway status, files, and runtime settings.
+- Web UI: product UI lives in `client-ui/`; after `npm run client-ui:build`, the Gateway serves `client-ui/dist` by default. Backend APIs cover chat, threads, model settings, tools/events, approvals, GUI status, Loop Engineering, Gateway status, files, and runtime settings.
 - Model layer: DeepSeek, MiniMax China Token Plan, OpenAI, and custom OpenAI-compatible providers with capability metadata and error classification.
 - Harness loop: context build, model request, tool calls, approvals, tool results, event stream, checkpoints, and recovery-oriented thread storage.
 - Context management: rectangular tool-call-safe compaction using persisted `compactions.jsonl`.
@@ -114,7 +115,6 @@ Fast local checks:
 
 ```bash
 npm run typecheck
-npm run web-build
 npm run check
 npm run doctor:smoke
 npm run model-smoke

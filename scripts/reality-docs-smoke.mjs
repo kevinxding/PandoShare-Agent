@@ -8,7 +8,7 @@ const sourceRoots = [
   resolve(root, 'src/core'),
   resolve(root, 'src/server'),
   resolve(root, 'src/main.tsx'),
-  resolve(root, 'web/src/App.tsx'),
+  resolve(root, 'client-ui/src'),
   resolve(root, 'scripts'),
 ]
 
@@ -81,7 +81,7 @@ const publicApiNames = [
 ]
 
 const capabilityEvidence = [
-  ['Web UI', ['web/src/App.tsx', 'serve:smoke']],
+  ['Web UI', ['client-ui/src/App.tsx', 'src/server/index.ts', 'serve:smoke']],
   ['Model layer', ['docs/kernel/model-router-v2.md', 'model:router-smoke']],
   ['Harness loop', ['docs/kernel/seven-kernels.md', 'kernel:smoke']],
   ['Context management', ['context-builder:smoke', 'compact:smoke']],

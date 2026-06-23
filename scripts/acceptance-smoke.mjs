@@ -104,7 +104,6 @@ function stepsForProfile(profile) {
     npmStep('typecheck', ['run', 'typecheck']),
     npmStep('build', ['run', 'build']),
     npmStep('check', ['run', 'check']),
-    npmStep('web-build', ['run', 'web-build']),
     npmStep('cli-entry-smoke', ['run', 'cli-entry:smoke']),
     npmStep('doctor-smoke', ['run', 'doctor:smoke']),
     npmStep('model-smoke', ['run', 'model-smoke']),
@@ -127,7 +126,6 @@ function stepsForProfile(profile) {
 
   return [
     ...required,
-    npmStep('web-build-smoke', ['run', 'web-build:smoke']),
     npmStep('serve-smoke', ['run', 'serve:smoke']),
     npmStep('dingxu-mcp-smoke', ['run', 'dingxu-mcp:smoke']),
     npmStep('gui-live-smoke', ['run', 'gui-live:smoke']),

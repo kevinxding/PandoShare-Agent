@@ -4,7 +4,7 @@ Use this checklist before uploading the project to GitHub.
 
 ## What To Commit
 
-- Source code: `src/`, `bin/`, `scripts/`, `web/src/`, `docs/`, `tools/`, `types/`, `utils/`, `vendor/README.md`.
+- Source code: `src/`, `bin/`, `scripts/`, `docs/`, `tools/`, `types/`, `utils/`, `vendor/README.md`, and `client-ui/`. Product Web UI source lives in `client-ui/`; build output stays ignored.
 - Project metadata: `package.json`, `package-lock.json`, `tsconfig.json`, `README.md`, `AGENTS.md`.
 - Safe sample config: `pandoshare.config.example.json`.
 
@@ -19,7 +19,9 @@ Use this checklist before uploading the project to GitHub.
 
 ```bash
 npm install
+npm run client-ui:install
 copy pandoshare.config.example.json pandoshare.config.json
+npm run client-ui:build
 npm run typecheck
 npm run check
 ```

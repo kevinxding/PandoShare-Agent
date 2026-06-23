@@ -50,7 +50,7 @@ function formatHelp(): string {
     '  pando mcp doctor|list [--json]',
     '  pando gui doctor [--json]',
     '  pando gateway doctor|status|start|recover|stop [--json]',
-    '  pando serve [--host <host>] [--port <number>] [--open]',
+    '  pando serve [--host <host>] [--port <number>] [--static-root <path>] [--open]',
     '  pando goal create|list|inspect|status|resume|pause|block|complete|export',
     '  pando thread list|inspect|rename|export|branch|compact',
     '  pando loop create|list|run|inspect|pause|resume|stop|export',

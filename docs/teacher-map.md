@@ -27,7 +27,7 @@ direct, and tied to real Pando files.
 | Loop Engineering | Claude Code task/subagent loop patterns plus Pando-native verifier storage | `src/services/loopRuntime/*`, loop CLI/Web/Gateway commands |
 | Gateway and heartbeat | Hermes gateway/background/heartbeat ideas | `src/services/gatewayRuntime/*`, `scripts/gateway-smoke.mjs`, `scripts/stability-runner.mjs` |
 | GUI automation | Dingxu GUI core plus Pando UIA-first wrapper | `src/services/gui/*`, `src/tools/GuiTool/index.ts`, `scripts/dingxu-mcp-smoke.mjs` |
-| Minimal Web UI | OpenCode information density as inspiration, no product polish in current phase | `src/server/index.ts`, `web/src/*`, `scripts/serve-smoke.mjs` |
+| Gateway Web UI | Product Web UI lives in `client-ui/`; Gateway owns same-origin APIs and static hosting, defaulting to `client-ui/dist` | `client-ui/src/App.tsx`, `src/server/index.ts`, `scripts/serve-smoke.mjs`, `pando serve` |
 | Acceptance and stability | Codex smoke-test rigor plus Hermes long-running runtime concerns | `scripts/acceptance-smoke.mjs`, `scripts/stability-runner.mjs` |
 
 ## Mirrored Root Shape

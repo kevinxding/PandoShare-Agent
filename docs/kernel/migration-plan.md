@@ -16,7 +16,7 @@
 | `src/services/gui` | GUI Runtime | Keep Dingxu/Windows MCP integration. GUI tools remain behind stable Pando GUI surfaces. |
 | `src/server` | Entry point | Server may depend on core. It should not be a state source or generate Agent run state. |
 | `src/main.tsx` | Entry point | CLI may depend on core. Prompt and exec continue through `AgentKernel.run`. |
-| `web/src/App.tsx` | UI only | Web UI stays a client of server APIs. It must not own durable runtime state. |
+| `client-ui` Product Web UI | UI only | Web UI source is kept in `client-ui/` and built to `client-ui/dist`, which `pando serve` serves by default. It must not own durable runtime state. |
 
 ## Phase 1: Core Boundary
 

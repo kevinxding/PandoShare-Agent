@@ -56,15 +56,14 @@
     "tool-permissions:smoke": "npm run build -- --pretty false && node scripts/advanced-tools-smoke.mjs permissions",
     "tool-events:smoke": "npm run build -- --pretty false && node scripts/advanced-tools-smoke.mjs events",
     "advanced-tools:smoke": "npm run build -- --pretty false && node scripts/advanced-tools-smoke.mjs all",
-    "web:dev": "vite --config web/vite.config.ts",
-    "web:build": "vite build --config web/vite.config.ts",
-    "web-build": "npm run web:build",
-    "web-build:smoke": "npm run web:build && node scripts/web-build-smoke.mjs",
-    "serve:smoke": "npm run build -- --pretty false && npm run web:build && node scripts/serve-smoke.mjs",
-    "approval-web:smoke": "npm run build -- --pretty false && npm run web:build && node scripts/approval-web-smoke.mjs",
-    "stability:smoke": "npm run build -- --pretty false && npm run web:build && node scripts/stability-runner.mjs --label smoke --duration-ms 2500 --monitor-interval-ms 250 --heartbeat-interval-ms 100",
-    "stability:1h": "npm run build -- --pretty false && npm run web:build && node scripts/stability-runner.mjs --label 1h --duration-ms 3600000 --monitor-interval-ms 30000 --heartbeat-interval-ms 5000 --keep-workspace",
-    "stability:10h": "npm run build -- --pretty false && npm run web:build && node scripts/stability-runner.mjs --label 10h --duration-ms 36000000 --monitor-interval-ms 60000 --heartbeat-interval-ms 10000 --keep-workspace",
+    "client-ui:install": "npm --prefix client-ui install",
+    "client-ui:build": "npm --prefix client-ui run build",
+    "client-ui:dev": "npm --prefix client-ui run dev",
+    "serve:smoke": "npm run build -- --pretty false && node scripts/serve-smoke.mjs",
+    "approval-web:smoke": "npm run build -- --pretty false && node scripts/approval-web-smoke.mjs",
+    "stability:smoke": "npm run build -- --pretty false && node scripts/stability-runner.mjs --label smoke --duration-ms 2500 --monitor-interval-ms 250 --heartbeat-interval-ms 100",
+    "stability:1h": "npm run build -- --pretty false && node scripts/stability-runner.mjs --label 1h --duration-ms 3600000 --monitor-interval-ms 30000 --heartbeat-interval-ms 5000 --keep-workspace",
+    "stability:10h": "npm run build -- --pretty false && node scripts/stability-runner.mjs --label 10h --duration-ms 36000000 --monitor-interval-ms 60000 --heartbeat-interval-ms 10000 --keep-workspace",
     "loop:core-smoke": "npm run build -- --pretty false && node scripts/core-loop-smoke.mjs",
     "loop:projection-smoke": "npm run build -- --pretty false && node scripts/loop-projection-smoke.mjs",
     "loop:recovery-smoke": "npm run build -- --pretty false && node scripts/loop-recovery-smoke.mjs",
@@ -181,7 +180,6 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "solid-js": "^1.9.3",
     "@opentui/core": "0.3.4",
     "@opentui/keymap": "0.3.4",
     "@opentui/solid": "0.3.4",
@@ -189,12 +187,11 @@
     "diff": "8.0.2",
     "fuzzysort": "3.1.0",
     "opentui-spinner": "0.0.7",
+    "solid-js": "^1.9.3",
     "strip-ansi": "7.1.2"
   },
   "devDependencies": {
-    "typescript": "5.8.2",
-    "vite": "^5.4.11",
-    "vite-plugin-solid": "^2.10.2"
+    "typescript": "5.8.2"
   },
   "imports": {
     "#pando-opentui/jsx-runtime": {
