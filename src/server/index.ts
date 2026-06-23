@@ -17,14 +17,20 @@ import {
 } from '../services/approvalStore/index.js'
 import { createGuiBackendFromMcpConnections, diagnoseGuiBackend } from '../services/gui/index.js'
 import { GatewayRuntime, LocalGatewayStore, type GatewayChannelConfig, type GatewayChannelKind } from '../services/gatewayRuntime/index.js'
-import { LocalGoalStore } from '../services/goalStore/index.js'
+import { LocalGoalStore, type GoalExportData, type GoalSummary } from '../services/goalStore/index.js'
 import { GoalService } from '../services/goalService/index.js'
-import { GoalRuntime } from '../services/goalRuntime/index.js'
+import {
+  GoalRuntime,
+  buildGoalContinuationPrompt,
+  type GoalRuntimeOutput,
+  type GoalRuntimeStepResult,
+} from '../services/goalRuntime/index.js'
 import { LocalLoopStore, LoopRuntime, type LoopSpec, type LoopWorkspaceIsolation } from '../services/loopRuntime/index.js'
 import { closeMcpConnections, summarizeMcpConnections } from '../services/mcp/index.js'
 import { loadRuntimeConfig, runPreflight } from '../services/preflight/index.js'
 import { LocalQuestionStore, type QuestionStatus } from '../services/questions/index.js'
 import { LocalThreadStore, modelMetadata } from '../services/threadStore/index.js'
+import { LocalWorkspaceStore, type WorkspaceConversationScope } from '../services/workspaceStore/index.js'
 import { LocalTaskStore } from '../tasks/index.js'
 import {
   builtinProviders,
@@ -452,6 +458,68 @@ async function handleApiRequest(
     return
   }
 
+  if (method === 'GET' && url.pathname === '/api/workspace') {
+    const store = new LocalWorkspaceStore(runtime.cwd)
+    sendJson(response, 200, { ok: true, data: await store.readSnapshot() })
+    return
+  }
+
+  if (method === 'POST' && url.pathname === '/api/projects') {
+    const body = await readJsonBody(request)
+    const store = new LocalWorkspaceStore(runtime.cwd)
+    const project = await store.createProject({
+      title: typeof body.title === 'string' && body.title.trim() ? body.title.trim() : undefined,
+    })
+    sendJson(response, 200, { ok: true, data: project })
+    return
+  }
+
+  if (method === 'POST' && url.pathname === '/api/conversations') {
+    const body = await readJsonBody(request)
+    const sessionId = `web-${Date.now()}`
+    const store = new LocalWorkspaceStore(runtime.cwd)
+    const model = modelMetadata(resolveModel(runtime.config))
+    const metadata = await store.createConversation({
+      sessionId,
+      cwd: runtime.cwd,
+      title: typeof body.title === 'string' && body.title.trim() ? body.title.trim() : undefined,
+      scope: parseWorkspaceConversationScope(body.scope),
+      model,
+      permissions: runtime.config.permissions,
+      goalId: typeof body.goalId === 'string' && body.goalId.trim() ? body.goalId.trim() : undefined,
+    })
+    sendJson(response, 200, { ok: true, data: metadata })
+    return
+  }
+
+  if (method === 'POST' && url.pathname === '/api/pins') {
+    const body = await readJsonBody(request)
+    const kind = body.kind === 'project' ? 'project' : body.kind === 'conversation' ? 'conversation' : undefined
+    const id = typeof body.id === 'string' && body.id.trim() ? body.id.trim() : undefined
+
+    if (!kind || !id) {
+      sendJson(response, 400, { ok: false, error: 'kind and id are required' })
+      return
+    }
+
+    const store = new LocalWorkspaceStore(runtime.cwd)
+    const pin = await store.setPinnedItem({
+      kind,
+      id,
+      title: typeof body.title === 'string' && body.title.trim() ? body.title.trim() : undefined,
+    })
+    sendJson(response, 200, { ok: true, data: pin })
+    return
+  }
+
+  const pinMatch = url.pathname.match(/^\/api\/pins\/([^/]+)$/)
+  if (method === 'DELETE' && pinMatch) {
+    const store = new LocalWorkspaceStore(runtime.cwd)
+    const removed = await store.unsetPinnedItem(decodeURIComponent(pinMatch[1]!))
+    sendJson(response, removed ? 200 : 404, { ok: removed })
+    return
+  }
+
   if (method === 'GET' && url.pathname === '/api/threads') {
     const store = new LocalThreadStore(runtime.cwd)
     sendJson(response, 200, await store.listThreadSummaries())
@@ -816,12 +884,12 @@ async function handleGoalActionRequest(
   const service = new GoalService(store)
   try {
     if (action === 'continue') {
-      const goalRuntime = new GoalRuntime(store)
-      const output = await goalRuntime.continueGoal(goalId, {
-        sessionId: `web-goal-runtime-${Date.now()}`,
-        idle: false,
+      const output = await continueGoalWithAgent(runtime, store, goalId, {
+        threadId: typeof body.threadId === 'string' && body.threadId.trim() ? body.threadId.trim() : undefined,
+        stream: body.stream === true,
+        idle: body.idle === true,
       })
-      sendJson(response, 200, { ok: output.ok, output, summary: output.goal ?? await service.readSummary(goalId) })
+      sendJson(response, output.streaming ? 202 : 200, output)
       return
     }
 
@@ -841,6 +909,226 @@ async function handleGoalActionRequest(
     sendJson(response, 400, { ok: false, error: errorMessage(error) })
   }
 }
+
+type GoalContinueInput = {
+  threadId?: string
+  stream?: boolean
+  idle?: boolean
+}
+
+type GoalContinueResponse = {
+  ok: boolean
+  streaming: boolean
+  threadId: string
+  runId: string
+  output?: GoalRuntimeOutput
+  summary: GoalSummary
+}
+
+async function continueGoalWithAgent(
+  runtime: ServerRuntime,
+  store: LocalGoalStore,
+  goalId: string,
+  input: GoalContinueInput,
+): Promise<GoalContinueResponse> {
+  const service = new GoalService(store)
+  const goal = await service.readGoal(goalId)
+  if (goal.metadata.status !== 'active') {
+    throw new Error(`Goal ${goalId} is ${goal.metadata.status}; resume it before continuing.`)
+  }
+
+  const sessionId = `web-goal-runtime-${Date.now()}`
+  const threadStore = new LocalThreadStore(runtime.cwd)
+  const threadId = await resolveGoalContinuationThreadId(goal, threadStore, runtime, sessionId, input.threadId)
+  if (runtime.activeRuns.has(threadId)) {
+    throw new Error(`Thread already has an active run: ${threadId}`)
+  }
+
+  const goalRuntime = new GoalRuntime(store)
+  const continueStep = (currentGoal: GoalExportData) => runGoalContinuationStep({
+    runtime,
+    store,
+    goal: currentGoal,
+    threadId,
+    sessionId,
+    idle: input.idle === true,
+  })
+
+  if (input.stream) {
+    runtime.activeRuns.set(threadId, {
+      threadId,
+      abort: () => undefined,
+    })
+    setTimeout(() => {
+      void goalRuntime.continueGoal(goalId, {
+        sessionId,
+        threadId,
+        idle: input.idle === true,
+        onContinue: continueStep,
+      }).then(output => {
+        runtime.broker.publish(threadId, {
+          type: output.ok ? 'web_goal_completed' : 'web_goal_failed',
+          goalId,
+          threadId,
+          sessionId,
+          runId: output.runId ?? sessionId,
+          message: output.message,
+          createdAtMs: Date.now(),
+        })
+      }).catch(error => {
+        runtime.broker.publish(threadId, {
+          type: 'web_goal_failed',
+          goalId,
+          threadId,
+          sessionId,
+          runId: sessionId,
+          error: errorMessage(error),
+          createdAtMs: Date.now(),
+        })
+      }).finally(() => {
+        runtime.activeRuns.delete(threadId)
+      })
+    }, 0)
+
+    return {
+      ok: true,
+      streaming: true,
+      threadId,
+      runId: sessionId,
+      summary: await service.readSummary(goalId),
+    }
+  }
+
+  const output = await goalRuntime.continueGoal(goalId, {
+    sessionId,
+    threadId,
+    idle: input.idle === true,
+    onContinue: continueStep,
+  })
+  return {
+    ok: output.ok,
+    streaming: false,
+    threadId: output.threadId ?? threadId,
+    runId: output.runId ?? sessionId,
+    output,
+    summary: output.goal ?? await service.readSummary(goalId),
+  }
+}
+
+async function runGoalContinuationStep(input: {
+  runtime: ServerRuntime
+  store: LocalGoalStore
+  goal: GoalExportData
+  threadId: string
+  sessionId: string
+  idle: boolean
+}): Promise<GoalRuntimeStepResult> {
+  const engine = new AgentKernel({
+    cwd: input.runtime.cwd,
+    sessionId: input.sessionId,
+    commandSource: 'web',
+    config: input.runtime.config,
+    registry: input.runtime.registry,
+    threadId: input.threadId,
+    goalId: input.goal.metadata.goalId,
+    fetch: input.runtime.fetch,
+    stream: true,
+    requestToolApproval: requestWebApproval(input.runtime, input.threadId),
+    onEvent: createWebEventHandler(input.runtime.broker, input.threadId),
+    metadata: {
+      guiBackend: createGuiBackendFromMcpConnections(input.runtime.mcpConnections),
+    },
+  })
+
+  input.runtime.activeRuns.set(input.threadId, {
+    threadId: input.threadId,
+    abort: () => engine.abort('server goal run aborted'),
+  })
+
+  try {
+    const prompt = buildGoalContinuationPrompt(input.goal, { idle: input.idle })
+    const result = await engine.submitMessage(prompt)
+    await input.store.appendEvidence(input.goal.metadata.goalId, {
+      type: 'thread',
+      strength: 'indirect',
+      summary: previewText(result.finalText, 300),
+      threadId: input.threadId,
+      metadata: { source: 'goal_continue' },
+    })
+    return {
+      message: previewText(result.finalText, 500) || 'Goal continuation completed.',
+      threadId: input.threadId,
+      runId: input.sessionId,
+    }
+  } finally {
+    input.runtime.activeRuns.delete(input.threadId)
+  }
+}
+
+async function resolveGoalContinuationThreadId(
+  goal: GoalExportData,
+  store: LocalThreadStore,
+  runtime: ServerRuntime,
+  sessionId: string,
+  requestedThreadId?: string,
+): Promise<string> {
+  if (requestedThreadId) {
+    const metadata = await readOrCreateGoalThread(store, runtime, goal, sessionId, requestedThreadId)
+    return metadata.threadId
+  }
+
+  for (let index = goal.metadata.relatedThreadIds.length - 1; index >= 0; index -= 1) {
+    const threadId = goal.metadata.relatedThreadIds[index]
+    if (!threadId) continue
+    try {
+      const metadata = await store.readMetadata(threadId)
+      if (metadata.goalId !== goal.metadata.goalId) {
+        await store.writeMetadata({ ...metadata, goalId: goal.metadata.goalId, updatedAtMs: Date.now() })
+      }
+      return threadId
+    } catch {
+      continue
+    }
+  }
+
+  const metadata = await readOrCreateGoalThread(store, runtime, goal, sessionId)
+  return metadata.threadId
+}
+
+async function readOrCreateGoalThread(
+  store: LocalThreadStore,
+  runtime: ServerRuntime,
+  goal: GoalExportData,
+  sessionId: string,
+  threadId?: string,
+) {
+  if (threadId) {
+    try {
+      const metadata = await store.readMetadata(threadId)
+      if (metadata.goalId !== goal.metadata.goalId) {
+        const nextMetadata = { ...metadata, goalId: goal.metadata.goalId, updatedAtMs: Date.now() }
+        await store.writeMetadata(nextMetadata)
+        return nextMetadata
+      }
+      return metadata
+    } catch {
+      // Fall through and create the requested thread id when it does not exist.
+    }
+  }
+
+  const title = `Goal: ${previewText(goal.metadata.title || goal.objective, 70).replace(/\s+/g, ' ')}`
+  const record = await store.createThread({
+    threadId,
+    sessionId,
+    cwd: runtime.cwd,
+    title,
+    model: modelMetadata(resolveModel(runtime.config)),
+    permissions: runtime.config.permissions,
+    goalId: goal.metadata.goalId,
+  })
+  return record.metadata
+}
+
 
 function buildToolsResponse(runtime: ServerRuntime): Record<string, unknown> {
   const tools = runtime.registry.tools.map(tool => ({
@@ -2131,7 +2419,9 @@ async function handleChatRequest(
 
   const store = new LocalThreadStore(runtime.cwd)
   const sessionId = `web-${Date.now()}`
-  const threadId = await resolveChatThreadId(body, store, runtime, sessionId, prompt)
+  const selectedPermissions = permissionsFromApprovalModeRequest(body, runtime.config.permissions)
+  const threadId = await resolveChatThreadId(body, store, runtime, sessionId, prompt, selectedPermissions)
+  await applyThreadPermissions(store, threadId, selectedPermissions)
   const goalId = typeof body.goalId === 'string' && body.goalId.trim() ? body.goalId.trim() : undefined
   const goalStore = goalId ? new LocalGoalStore(runtime.cwd) : undefined
   if (goalId && goalStore) {
@@ -2158,7 +2448,10 @@ async function handleChatRequest(
     cwd: runtime.cwd,
     sessionId,
     commandSource: 'web',
-    config: runtime.config,
+    config: {
+      ...runtime.config,
+      permissions: selectedPermissions,
+    },
     registry: runtime.registry,
     threadId,
     goalId,
@@ -2296,6 +2589,7 @@ async function resolveChatThreadId(
   runtime: ServerRuntime,
   sessionId: string,
   prompt: string,
+  permissions: PermissionConfig,
 ): Promise<string> {
   if (typeof body.threadId === 'string' && body.threadId.trim()) return body.threadId.trim()
   const record = await store.createThread({
@@ -2303,10 +2597,115 @@ async function resolveChatThreadId(
     cwd: runtime.cwd,
     title: previewText(prompt, 80).replace(/\s+/g, ' '),
     model: modelMetadata(resolveModel(runtime.config)),
-    permissions: runtime.config.permissions,
+    permissions,
     goalId: typeof body.goalId === 'string' && body.goalId.trim() ? body.goalId.trim() : undefined,
   })
   return record.metadata.threadId
+}
+
+function permissionsFromApprovalModeRequest(
+  body: Record<string, unknown>,
+  fallback: PermissionConfig | undefined,
+): PermissionConfig {
+  const modePermissions = permissionsForApprovalMode(body.approvalMode, fallback)
+
+  return removeUndefinedFields({
+    ...modePermissions,
+    approvalPolicy: parseApprovalPolicy(body.approvalPolicy, modePermissions.approvalPolicy),
+    sandboxMode: parseSandboxMode(body.sandboxMode, modePermissions.sandboxMode),
+    approvalsReviewer: parseApprovalsReviewer(body.approvalsReviewer, modePermissions.approvalsReviewer),
+  }) as PermissionConfig
+}
+
+function permissionsForApprovalMode(value: unknown, fallback: PermissionConfig | undefined): PermissionConfig {
+  const fallbackPermissions = normalizePermissionSettings(fallback)
+  const mode = normalizeApprovalMode(value)
+
+  switch (mode) {
+    case 'request_approval':
+      return {
+        approvalPolicy: 'on-request',
+        approvalsReviewer: 'user',
+        sandboxMode: 'workspace-write',
+      }
+    case 'auto_review':
+      return {
+        approvalPolicy: 'on-request',
+        approvalsReviewer: 'auto_review',
+        sandboxMode: 'workspace-write',
+      }
+    case 'full_access':
+      return {
+        approvalPolicy: 'never',
+        approvalsReviewer: 'user',
+        sandboxMode: 'danger-full-access',
+      }
+    default:
+      return fallbackPermissions
+  }
+}
+
+function normalizePermissionSettings(permissions: PermissionConfig | undefined): PermissionConfig {
+  return {
+    approvalPolicy: permissions?.approvalPolicy ?? 'on-request',
+    approvalsReviewer: permissions?.approvalsReviewer ?? 'user',
+    sandboxMode: permissions?.sandboxMode ?? 'workspace-write',
+    granular: permissions?.granular,
+    trustedTools: permissions?.trustedTools,
+  }
+}
+
+function normalizeApprovalMode(value: unknown): 'request_approval' | 'auto_review' | 'full_access' | undefined {
+  if (typeof value !== 'string') return undefined
+  const mode = value.trim().toLocaleLowerCase()
+
+  if (
+    mode === 'request_approval' ||
+    mode === 'request-approval' ||
+    mode === 'ask-for-approval' ||
+    mode === 'manual' ||
+    value.trim() === '请求批准'
+  ) return 'request_approval'
+
+  if (
+    mode === 'auto_review' ||
+    mode === 'auto-review' ||
+    mode === 'auto-approve' ||
+    mode === 'auto_approve' ||
+    value.trim() === '替我审批'
+  ) return 'auto_review'
+
+  if (
+    mode === 'full_access' ||
+    mode === 'full-access' ||
+    mode === 'danger-full-access' ||
+    value.trim() === '完全访问权限'
+  ) return 'full_access'
+
+  return undefined
+}
+
+async function applyThreadPermissions(
+  store: LocalThreadStore,
+  threadId: string,
+  permissions: PermissionConfig,
+): Promise<void> {
+  const metadata = await store.readMetadata(threadId)
+  if (samePermissions(metadata.permissions, permissions)) return
+  await store.writeMetadata({
+    ...metadata,
+    permissions,
+    updatedAtMs: Date.now(),
+  })
+}
+
+function samePermissions(
+  current: PermissionConfig | undefined,
+  next: PermissionConfig,
+): boolean {
+  return current?.approvalPolicy === next.approvalPolicy &&
+    (current.approvalsReviewer ?? 'user') === (next.approvalsReviewer ?? 'user') &&
+    current.sandboxMode === next.sandboxMode
 }
 
 function requestWebApproval(runtime: ServerRuntime, threadId: string) {
@@ -2604,6 +3003,18 @@ function eventThreadId(event: AgentEvent): string | undefined {
 
 function resolveModel(config: ProjectConfig) {
   return resolveDefaultModel(config)
+}
+
+function parseWorkspaceConversationScope(value: unknown): WorkspaceConversationScope {
+  if (!isRecord(value) || value.type !== 'project') {
+    return { type: 'global' }
+  }
+
+  return {
+    type: 'project',
+    projectId: typeof value.projectId === 'string' && value.projectId.trim() ? value.projectId.trim() : undefined,
+    projectName: typeof value.projectName === 'string' && value.projectName.trim() ? value.projectName.trim() : undefined,
+  }
 }
 
 class EventBroker {

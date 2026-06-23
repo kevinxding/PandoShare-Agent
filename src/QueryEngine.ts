@@ -1,6 +1,8 @@
 import { runQueryTurn, type QueryTurnOutput } from './query.js'
 import { AgentSession } from './services/agent/index.js'
 import { resolveDefaultModel, type ProjectConfig } from './services/config/index.js'
+import { buildGoalContextMessage } from './services/goalRuntime/index.js'
+import { LocalGoalStore } from './services/goalStore/index.js'
 import {
   buildThreadContext,
   type ContextBuilderOptions,
@@ -225,8 +227,13 @@ export class QueryEngine {
       options: this.options.context,
     })
     const model = resolveDefaultModel(this.effectiveConfig)
+    const goalContextMessage = await this.buildActiveGoalContextMessage()
+    const contextMessagesForBudget = [
+      ...(goalContextMessage ? [goalContextMessage] : []),
+      ...context.initialMessages,
+    ]
     const tokenBudget = buildTokenBudgetContext({
-      messages: context.initialMessages,
+      messages: contextMessagesForBudget,
       model,
       threadId: this.threadMetadata.threadId,
       windowId: context.stats.compactionWindowId,
@@ -236,6 +243,7 @@ export class QueryEngine {
     })
     const initialMessages = [
       ...(tokenBudget.message ? [tokenBudget.message] : []),
+      ...(goalContextMessage ? [goalContextMessage] : []),
       ...context.initialMessages,
     ]
     this.lastContextStats = {
@@ -271,10 +279,25 @@ export class QueryEngine {
       compactionWindowId: context.stats.compactionWindowId,
       compactedMessageCount: context.stats.compactedMessageCount,
       tokenBudget: tokenBudget.stats,
-      contextNotes: context.contextNotes,
+      contextNotes: goalContextMessage ? [...context.contextNotes, 'Active goal context was included.'] : context.contextNotes,
     })
   }
 
+  private async buildActiveGoalContextMessage(): Promise<AgentConversationMessage | undefined> {
+    const goalId = this.threadMetadata?.goalId
+    if (!goalId) return undefined
+
+    try {
+      const goal = await new LocalGoalStore(this.options.cwd).readExport(goalId)
+      if (goal.metadata.status !== 'active') return undefined
+      return {
+        role: 'user',
+        content: buildGoalContextMessage(goal),
+      }
+    } catch {
+      return undefined
+    }
+  }
   private runPreparedTurn(prompt: string): Promise<QueryTurnOutput> {
     if (!this.context || !this.agentSession) {
       throw new Error('QueryEngine failed to prepare turn execution')

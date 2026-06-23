@@ -25,6 +25,10 @@ export type ThreadMetadata = {
   parentThreadId?: string
   branchFromEventId?: string
   goalId?: string
+  projectId?: string
+  projectName?: string
+  pinned?: boolean
+  archivedAtMs?: number
 }
 
 export type ThreadCheckpoint = {
@@ -95,6 +99,10 @@ export type ThreadCreateInput = {
   parentThreadId?: string
   branchFromEventId?: string
   goalId?: string
+  projectId?: string
+  projectName?: string
+  pinned?: boolean
+  archivedAtMs?: number
 }
 
 export type ThreadRecord = {
@@ -185,6 +193,10 @@ export class LocalThreadStore {
       parentThreadId: input.parentThreadId,
       branchFromEventId: input.branchFromEventId,
       goalId: input.goalId,
+      projectId: input.projectId,
+      projectName: input.projectName,
+      pinned: input.pinned,
+      archivedAtMs: input.archivedAtMs,
     }
     await this.writeMetadata(metadata)
     await ensureThreadFiles(this.threadPath(threadId))

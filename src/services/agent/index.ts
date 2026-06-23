@@ -131,7 +131,7 @@ export class AgentSession {
           tools,
           toolChoice: tools?.length ? 'auto' : undefined,
           temperature: input.temperature ?? this.defaultTemperature ?? 0,
-          maxTokens: input.maxTokens ?? this.defaultMaxTokens ?? 1024,
+          maxTokens: input.maxTokens ?? this.defaultMaxTokens,
           providerOptions: mergeProviderOptions(
             defaultAgentProviderOptions(this.model.provider.id),
             mergeProviderOptions(this.defaultProviderOptions, input.providerOptions),

@@ -1,5 +1,6 @@
-import type { ComponentType, CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
+import type { ChangeEvent, ComponentType, CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -57,27 +58,39 @@ import {
   SlidersHorizontal,
   Sparkles,
   TerminalSquare,
+  Target,
   ThumbsUp,
   Trash2,
+  X,
 } from 'lucide-react'
 import './App.css'
 import {
   createConversation,
+  continueGoal,
+  createGoal,
   createProject,
   createScheduledTask,
   deleteScheduledTask,
+  loadActiveGoal,
+  loadConversationEvents,
   loadConversationMessages,
   loadHeartbeatSnapshot,
   loadModelGroups,
+  loadPendingApprovals,
   loadWorkspaceSnapshot,
   pauseScheduledTask,
   runScheduledTask,
+  resolveApproval,
   sendConversationMessage,
   setHeartbeatRunning as setHeartbeatRunningBackend,
   setPinnedItem,
   streamRun,
   unsetPinnedItem,
+  updateGoalStatus,
+  type AgentRunEvent,
+  type ApprovalDecision,
   type HeartbeatTaskInput,
+  type UiGoalSummary,
 } from './backendApi'
 
 type IconType = ComponentType<{ size?: number; strokeWidth?: number }>
@@ -124,19 +137,87 @@ type ChatMessage = {
   role: 'user' | 'assistant'
   text: string
   time: string
+  activities?: ActivityPart[]
+  timelineParts?: AssistantTimelinePart[]
 }
+
+type ActivityKind = 'turn' | 'context' | 'model' | 'tool' | 'approval' | 'gui' | 'result' | 'error'
+
+type ActivityStatus = 'pending' | 'running' | 'waiting_approval' | 'approved' | 'rejected' | 'completed' | 'failed'
+
+type ActivityPart = {
+  id: string
+  kind: ActivityKind
+  status: ActivityStatus
+  title: string
+  summary: string
+  detail?: string
+  toolCallId?: string
+  approvalId?: string
+  startedAtMs?: number
+  completedAtMs?: number
+  inputPreview?: string
+  outputPreview?: string
+}
+
+type AssistantTimelinePart =
+  | {
+      id: string
+      type: 'text'
+      text: string
+    }
+  | {
+      id: string
+      type: 'activity'
+      activity: ActivityPart
+    }
 
 type SmoothWriterState = {
   queue: string
   timer: number | null
   completed: boolean
+  pendingActivities: ActivityPart[]
 }
 
 type ComposerSendPayload = {
   message: string
   approvalMode: string
   modelId?: string
+  goalId?: string
 }
+
+type AttachedGoal = {
+  goalId?: string
+  text: string
+  paused: boolean
+  progressPercent?: number
+  status?: string
+}
+
+type PendingApprovalStatus = 'pending' | 'submitting' | 'approved' | 'rejected' | 'failed'
+
+type PendingApprovalItem = {
+  id: string
+  threadId?: string
+  toolName: string
+  reason?: string
+  risk?: string
+  safety?: string
+  sandboxMode?: string
+  approvalPolicy?: string
+  inputPreview?: string
+  createdAtMs?: number
+  status: PendingApprovalStatus
+  error?: string
+}
+
+const goalSummaryToAttachedGoal = (goal: UiGoalSummary): AttachedGoal => ({
+  goalId: goal.id,
+  text: goal.objective || goal.title,
+  paused: goal.status !== 'active',
+  progressPercent: goal.progressPercent,
+  status: goal.status,
+})
 
 const quickActions: NavItem[] = [
   { label: '新对话', icon: MessageSquarePlus },
@@ -224,16 +305,29 @@ const projects: Project[] = [
 
 const chats = ['会话 A', '会话 B', '会话 C']
 
-const attachActions: NavItem[] = [
-  { label: '添加文件', icon: FilePlus2 },
-  { label: '添加文件夹', icon: FolderInput },
+type AttachActionItem = NavItem & { id?: 'goal' | 'file' | 'folder' }
+
+const attachActions: AttachActionItem[] = [
+  { id: 'goal', label: 'Goal / \u76ee\u6807', icon: Target },
+  { id: 'file', label: '添加文件', icon: FilePlus2 },
+  { id: 'folder', label: '添加文件夹', icon: FolderInput },
   { label: '选择技能', icon: Sparkles },
   { label: '选择插件', icon: PackagePlus },
 ]
 
-type SlashCommandItem = NavItem & { description: string }
+const mcpServerPlaceholders = [
+  'cua-driver',
+  'dingxu_human_gui',
+  'node_repl',
+  'open-computer-use',
+  'pando',
+  'windows-mcp',
+]
+
+type SlashCommandItem = NavItem & { id?: 'goal'; description: string }
 
 const slashCommandActions: SlashCommandItem[] = [
+  { id: 'goal', label: 'Goal / \u76ee\u6807', description: 'Create and attach a local goal', icon: Target },
   { label: 'MCP', description: '显示 MCP 服务器状态', icon: Code2 },
   { label: '个性', description: '选择 Codex 的回应方式', icon: Gauge },
   { label: '代码审查', description: '审查未暂存的更改，或与某个分支进行比较', icon: ShieldCheck },
@@ -275,7 +369,9 @@ const getSlashMenuState = (message: string): SlashMenuState | null => {
     return { query, commands: slashCommandActions, skills: slashSkillActions }
   }
 
-  const commands = slashCommandActions.filter((item) => matchesSlashQuery(item.label, query))
+  const commands = slashCommandActions.filter(
+    (item) => matchesSlashQuery(item.label, query) || matchesSlashQuery(item.description, query),
+  )
   const skills = slashSkillActions.filter((skill) => matchesSlashQuery(skill, query) || matchesSlashQuery("Skill", query))
 
   if (commands.length === 0 && skills.length === 0) {
@@ -301,6 +397,9 @@ type ModelGroup = {
 }
 
 const defaultModelLabel = '\u9009\u62e9\u6a21\u578b'
+const modelVisibilityKey = (provider: string, model: string) => `${provider}::${model}`
+const modelVisibilityKeys = (groups: ModelGroup[]) =>
+  groups.flatMap((group) => group.models.map((model) => modelVisibilityKey(group.provider, model)))
 
 const modelGroups: ModelGroup[] = [
   { provider: 'DeepSeek\uff08\u6df1\u5ea6\u6c42\u7d22\uff09', models: ['DeepSeek V4 Pro', 'DeepSeek V4 Flash', 'DeepSeek R1'] },
@@ -309,6 +408,7 @@ const modelGroups: ModelGroup[] = [
   { provider: 'Qwen \u901a\u4e49\u5343\u95ee\uff08\u963f\u91cc\uff09', models: ['Qwen3.7 Max', 'Qwen3.6 Plus', 'Qwen2.5-VL'] },
 ]
 const backendUnavailableReply = '后端或模型请求失败，请检查 Pando 后端状态后重试。'
+const assistantThinkingText = '正在思考'
 
 const initialMessages: ChatMessage[] = []
 
@@ -469,7 +569,7 @@ function NestedChatRow({
         aria-label={chat}
         aria-current={active ? 'page' : undefined}
         onClick={onOpenChat}
-      >
+      >
         <span>{chat}</span>
       </button>
       <div className="nested-chat-actions">
@@ -514,7 +614,7 @@ function SidebarChatRow({
         aria-label={chat}
         aria-current={active ? 'page' : undefined}
         onClick={onOpenChat}
-      >
+      >
         <span>{chat}</span>
       </button>
       <div className="sidebar-chat-actions">
@@ -636,13 +736,15 @@ function ProjectBlock({
 
 function SettingsSidebar({
   collapsed,
+  activeSetting,
+  onSettingChange,
   onBackApp,
 }: {
   collapsed: boolean
+  activeSetting: string
+  onSettingChange: (setting: string) => void
   onBackApp: () => void
 }) {
-  const [activeSetting, setActiveSetting] = useState('general')
-
   return (
     <aside className={`left-sidebar settings-sidebar ${collapsed ? 'collapsed' : ''}`} aria-label="\u8bbe\u7f6e\u5bfc\u822a">
       <div className="sidebar-inner settings-sidebar-inner">
@@ -669,7 +771,7 @@ function SettingsSidebar({
                     <button
                       className={activeSetting === item.id ? 'settings-nav-item active' : 'settings-nav-item'}
                       type="button"
-                      onClick={() => setActiveSetting(item.id)}
+                      onClick={() => onSettingChange(item.id)}
                       key={item.id}
                     >
                       <Icon size={16} strokeWidth={1.8} />
@@ -690,21 +792,25 @@ function LeftSidebar({
   collapsed,
   activeChatId,
   activeView,
+  activeSetting,
   onOpenChat,
   onOpenHeartbeat,
   onOpenSettings,
   onCloseSettings,
   onOpenPlugins,
+  onSettingChange,
   onToggle,
 }: {
   collapsed: boolean
   activeChatId: string
   activeView: WorkspaceView
+  activeSetting: string
   onOpenChat: (chat: ActiveChat) => void
   onOpenHeartbeat: () => void
   onOpenSettings: () => void
   onCloseSettings: () => void
   onOpenPlugins: () => void
+  onSettingChange: (setting: string) => void
   onToggle: () => void
 }) {
   const [moreOpen, setMoreOpen] = useState(false)
@@ -891,7 +997,14 @@ function LeftSidebar({
   }
 
   if (activeView === 'settings') {
-    return <SettingsSidebar collapsed={collapsed} onBackApp={onCloseSettings} />
+    return (
+      <SettingsSidebar
+        collapsed={collapsed}
+        activeSetting={activeSetting}
+        onSettingChange={onSettingChange}
+        onBackApp={onCloseSettings}
+      />
+    )
   }
 
   return (
@@ -1135,20 +1248,99 @@ function PluginsWorkspace() {
   )
 }
 
-function SettingsWorkspace() {
+function McpSettingsContent() {
+  const [enabledServers, setEnabledServers] = useState<Set<string>>(() => new Set(mcpServerPlaceholders))
+
+  const toggleServer = (server: string) => {
+    setEnabledServers((currentServers) => {
+      const nextServers = new Set(currentServers)
+
+      if (nextServers.has(server)) {
+        nextServers.delete(server)
+      } else {
+        nextServers.add(server)
+      }
+
+      return nextServers
+    })
+  }
+
+  return (
+    <div className="settings-mcp-content">
+      <div className="settings-mcp-header">
+        <h1>MCP 服务器</h1>
+        <p>
+          连接外部工具和数据源。
+          <a href="#" onClick={(event) => event.preventDefault()}>
+            了解更多。
+          </a>
+        </p>
+      </div>
+
+      <section className="settings-mcp-section" aria-label="MCP servers">
+        <div className="settings-mcp-section-header">
+          <h2>服务器</h2>
+          <button className="settings-mcp-add" type="button">
+            <Plus size={15} />
+            <span>添加服务器</span>
+          </button>
+        </div>
+
+        <div className="settings-mcp-table">
+          {mcpServerPlaceholders.map((server) => {
+            const enabled = enabledServers.has(server)
+
+            return (
+              <div className="settings-mcp-row" key={server}>
+                <span className="settings-mcp-name">{server}</span>
+                <div className="settings-mcp-row-actions">
+                  <button className="settings-mcp-gear" type="button" aria-label={`${server} 设置`}>
+                    <Settings size={15} />
+                  </button>
+                  <button
+                    className={`settings-mcp-switch ${enabled ? 'checked' : ''}`}
+                    type="button"
+                    role="switch"
+                    aria-checked={enabled}
+                    aria-label={`${enabled ? '禁用' : '启用'} ${server}`}
+                    onClick={() => toggleServer(server)}
+                  >
+                    <span />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function SettingsWorkspace({ activeSetting }: { activeSetting: string }) {
   return (
     <main className="settings-workspace" aria-label="Settings">
-      <section className="settings-workspace-shell">
-        <div className="settings-coming-soon">
-          <Settings size={28} strokeWidth={1.7} />
-          <h1>{"\u656c\u8bf7\u671f\u5f85"}</h1>
-        </div>
+      <section className={`settings-workspace-shell ${activeSetting === 'mcp' ? 'mcp-settings-shell' : ''}`}>
+        {activeSetting === 'mcp' ? (
+          <McpSettingsContent />
+        ) : (
+          <div className="settings-coming-soon">
+            <Settings size={28} strokeWidth={1.7} />
+            <h1>{"\u656c\u8bf7\u671f\u5f85"}</h1>
+          </div>
+        )}
       </section>
     </main>
   )
 }
 
-function SlashCommandMenu({ state }: { state: SlashMenuState }) {
+function SlashCommandMenu({
+  state,
+  onSelectCommand,
+}: {
+  state: SlashMenuState
+  onSelectCommand: (item: SlashCommandItem) => void
+}) {
   const showSkills = state.skills.length > 0
 
   return (
@@ -1165,7 +1357,7 @@ function SlashCommandMenu({ state }: { state: SlashMenuState }) {
           const Icon = item.icon
 
           return (
-            <button className="slash-command-row" type="button" key={item.label}>
+            <button className="slash-command-row" type="button" key={item.label} onClick={() => onSelectCommand(item)}>
               <span className="slash-command-icon">
                 <Icon size={15} />
               </span>
@@ -1195,7 +1387,25 @@ function SlashCommandMenu({ state }: { state: SlashMenuState }) {
   )
 }
 
-function AttachMenu() {
+function AttachMenu({
+  onSelectGoal,
+  onSelectFile,
+  onSelectFolder,
+}: {
+  onSelectGoal: () => void
+  onSelectFile: () => void
+  onSelectFolder: () => void
+}) {
+  const selectAction = (item: AttachActionItem) => {
+    if (item.id === 'goal') {
+      onSelectGoal()
+    } else if (item.id === 'file') {
+      onSelectFile()
+    } else if (item.id === 'folder') {
+      onSelectFolder()
+    }
+  }
+
   return (
     <motion.div
       className="attach-menu"
@@ -1209,7 +1419,12 @@ function AttachMenu() {
         const Icon = item.icon
 
         return (
-          <button className="attach-item" type="button" key={item.label}>
+          <button
+            className="attach-item"
+            type="button"
+            key={item.label}
+            onClick={() => selectAction(item)}
+          >
             <Icon size={16} />
             <span>{item.label}</span>
           </button>
@@ -1253,12 +1468,16 @@ function ModelMenu({
   modelGroups,
   onQueryChange,
   onSelectModel,
+  onAddModel,
+  onManageModels,
 }: {
   query: string
   selectedModel: string
   modelGroups: ModelGroup[]
   onQueryChange: (query: string) => void
   onSelectModel: (model: string) => void
+  onAddModel: () => void
+  onManageModels: () => void
 }) {
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const filteredGroups = modelGroups
@@ -1291,10 +1510,10 @@ function ModelMenu({
             onChange={(event) => onQueryChange(event.target.value)}
           />
         </label>
-        <button className="model-icon-button" type="button" aria-label={"\u6dfb\u52a0\u6a21\u578b"}>
+        <button className="model-icon-button" type="button" aria-label={"\u6dfb\u52a0\u6a21\u578b"} onClick={onAddModel}>
           <Plus size={16} />
         </button>
-        <button className="model-icon-button" type="button" aria-label={"\u6a21\u578b\u8bbe\u7f6e"}>
+        <button className="model-icon-button" type="button" aria-label={"\u6a21\u578b\u8bbe\u7f6e"} onClick={onManageModels}>
           <SlidersHorizontal size={16} />
         </button>
       </div>
@@ -1331,6 +1550,884 @@ function ModelMenu({
   )
 }
 
+function ModelManageDialog({
+  open,
+  modelGroups,
+  visibleModelKeys,
+  onClose,
+  onToggleModel,
+  onConnectProvider,
+}: {
+  open: boolean
+  modelGroups: ModelGroup[]
+  visibleModelKeys: Set<string> | null
+  onClose: () => void
+  onToggleModel: (provider: string, model: string) => void
+  onConnectProvider: () => void
+}) {
+  const [query, setQuery] = useState('')
+
+  if (typeof document === 'undefined') {
+    return null
+  }
+
+  const allKeys = visibleModelKeys ?? new Set(modelVisibilityKeys(modelGroups))
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const filteredGroups = modelGroups
+    .map((group) => ({
+      ...group,
+      models: group.models.filter((model) =>
+        normalizedQuery ? matchesSlashQuery(`${group.provider} ${model}`, normalizedQuery) : true,
+      ),
+    }))
+    .filter((group) => group.models.length > 0)
+
+  return createPortal(
+    <AnimatePresence>
+      {open ? (
+        <motion.div
+          className="model-manage-layer"
+          role="presentation"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.16 }}
+          onClick={onClose}
+        >
+          <motion.div
+            className="model-manage-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="管理模型"
+            initial={{ opacity: 0, y: 18, scale: 0.985 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.985 }}
+            transition={{ duration: 0.18 }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="model-manage-header">
+              <div>
+                <h2>管理模型</h2>
+                <p>自定义模型选择器中显示的模型。</p>
+              </div>
+              <div className="model-manage-actions">
+                <button className="model-manage-provider" type="button" onClick={onConnectProvider}>
+                  <Plus size={14} />
+                  <span>连接提供商</span>
+                </button>
+                <button className="model-manage-close" type="button" aria-label="关闭" onClick={onClose}>
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+
+            <label className="model-manage-search">
+              <Search size={16} />
+              <input
+                aria-label="搜索模型"
+                placeholder="搜索模型"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </label>
+
+            <div className="model-manage-list">
+              {filteredGroups.length > 0 ? (
+                filteredGroups.map((group) => (
+                  <section className="model-manage-group" key={group.provider}>
+                    <h3>{group.provider}</h3>
+                    {group.models.map((model) => {
+                      const checked = allKeys.has(modelVisibilityKey(group.provider, model))
+
+                      return (
+                        <button
+                          className="model-manage-row"
+                          type="button"
+                          role="switch"
+                          aria-checked={checked}
+                          key={model}
+                          onClick={() => onToggleModel(group.provider, model)}
+                        >
+                          <span>{model}</span>
+                          <span className={`model-switch ${checked ? 'checked' : ''}`} aria-hidden="true">
+                            <span />
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </section>
+                ))
+              ) : (
+                <div className="model-manage-empty">没有匹配模型</div>
+              )}
+            </div>
+          </motion.div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>,
+    document.body,
+  )
+}
+
+const providerGroups = [
+  {
+    title: '热门',
+    providers: [
+      { name: 'OpenAI', description: '使用 ChatGPT Pro/Plus 或 API 密钥连接', icon: Sparkles },
+      { name: 'Google', description: 'Gemini 模型提供商', icon: Sparkles },
+      { name: 'OpenRouter', description: '统一路由多个模型', icon: ExternalLink },
+      { name: 'Vercel AI Gateway', description: '通过 Vercel 网关连接', icon: PackagePlus },
+    ],
+  },
+  {
+    title: '其他',
+    providers: [
+      { name: '自定义', description: '兼容 OpenAI 风格接口', icon: SlidersHorizontal, tag: '自定义' },
+      { name: '302.AI', description: '第三方模型聚合服务', icon: Bot },
+      { name: 'Abacus', description: '外部模型提供商', icon: Activity },
+      { name: 'abiliteration.ai', description: '外部模型提供商', icon: Sparkles },
+      { name: 'AIHubMix', description: '第三方模型聚合服务', icon: Gauge },
+    ],
+  },
+]
+
+function ProviderConnectDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (typeof document === 'undefined') {
+    return null
+  }
+
+  return createPortal(
+    <AnimatePresence>
+      {open ? (
+        <motion.div
+          className="provider-dialog-layer"
+          role="presentation"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.16 }}
+          onClick={onClose}
+        >
+          <motion.div
+            className="provider-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="连接提供商"
+            initial={{ opacity: 0, y: 18, scale: 0.985 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.985 }}
+            transition={{ duration: 0.18 }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="provider-dialog-header">
+              <div>
+                <h2>连接提供商</h2>
+                <p>占位界面，后续接入模型配置。</p>
+              </div>
+              <button className="provider-dialog-close" type="button" aria-label="关闭" onClick={onClose}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <label className="provider-search">
+              <Search size={16} />
+              <input aria-label="搜索提供商" placeholder="搜索提供商" readOnly />
+            </label>
+
+            <div className="provider-list">
+              {providerGroups.map((group) => (
+                <section className="provider-group" key={group.title}>
+                  <h3>{group.title}</h3>
+                  {group.providers.map((provider) => {
+                    const ProviderIcon = provider.icon
+
+                    return (
+                      <button className="provider-option" type="button" key={provider.name}>
+                        <span className="provider-option-icon">
+                          <ProviderIcon size={15} />
+                        </span>
+                        <span className="provider-option-copy">
+                          <span className="provider-option-title">
+                            {provider.name}
+                            {provider.tag ? <span className="provider-option-tag">{provider.tag}</span> : null}
+                          </span>
+                          <span className="provider-option-description">{provider.description}</span>
+                        </span>
+                      </button>
+                    )
+                  })}
+                </section>
+              ))}
+            </div>
+          </motion.div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>,
+    document.body,
+  )
+}
+
+const isAgentEventRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const agentEventRecord = (event: AgentRunEvent, key: string): Record<string, unknown> | undefined => {
+  const value = event[key]
+
+  return isAgentEventRecord(value) ? value : undefined
+}
+
+const agentEventString = (source: Record<string, unknown> | undefined, key: string): string | undefined => {
+  const value = source?.[key]
+
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+}
+
+const agentEventNumber = (source: Record<string, unknown> | undefined, key: string): number | undefined => {
+  const value = source?.[key]
+
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+const previewEventValue = (value: unknown): string | undefined => {
+  if (typeof value === 'string') {
+    return value.trim() || undefined
+  }
+
+  if (value === undefined || value === null) {
+    return undefined
+  }
+
+  try {
+    return JSON.stringify(value, null, 2).slice(0, 900)
+  } catch {
+    return String(value).slice(0, 900)
+  }
+}
+
+const getAgentRunEventType = (event: AgentRunEvent) =>
+  agentEventString(event, 'type') ?? agentEventString(event, 'event')
+
+const getApprovalEventId = (event: AgentRunEvent) => {
+  const request = agentEventRecord(event, 'request')
+
+  return agentEventString(event, 'approvalId') ?? agentEventString(request, 'approvalId') ?? agentEventString(event, 'id')
+}
+
+const normalizePendingApproval = (event: AgentRunEvent): PendingApprovalItem | null => {
+  const type = getAgentRunEventType(event)
+  if (type !== 'approval_pending' && type !== 'approval_requested') {
+    return null
+  }
+
+  const request = agentEventRecord(event, 'request')
+  const approvalId = getApprovalEventId(event)
+
+  if (!approvalId) {
+    return null
+  }
+
+  const inputPreview =
+    previewEventValue(request?.input) ??
+    previewEventValue(request?.arguments) ??
+    previewEventValue(request?.command) ??
+    previewEventValue(request?.preview)
+
+  return {
+    id: approvalId,
+    threadId: agentEventString(event, 'threadId') ?? agentEventString(request, 'threadId'),
+    toolName:
+      agentEventString(request, 'toolName') ??
+      agentEventString(request, 'tool') ??
+      agentEventString(event, 'toolName') ??
+      agentEventString(event, 'tool') ??
+      'tool',
+    reason: agentEventString(request, 'reason') ?? agentEventString(event, 'reason'),
+    risk: agentEventString(request, 'risk') ?? agentEventString(event, 'risk'),
+    safety: agentEventString(request, 'safety') ?? agentEventString(event, 'safety'),
+    sandboxMode: agentEventString(request, 'sandboxMode') ?? agentEventString(event, 'sandboxMode'),
+    approvalPolicy: agentEventString(request, 'approvalPolicy') ?? agentEventString(event, 'approvalPolicy'),
+    inputPreview,
+    createdAtMs: agentEventNumber(event, 'createdAtMs') ?? agentEventNumber(request, 'createdAtMs'),
+    status: 'pending',
+  }
+}
+
+const agentEventBoolean = (source: Record<string, unknown> | undefined, key: string): boolean | undefined => {
+  const value = source?.[key]
+
+  return typeof value === 'boolean' ? value : undefined
+}
+
+const agentEventArray = (source: Record<string, unknown> | undefined, key: string): unknown[] | undefined => {
+  const value = source?.[key]
+
+  return Array.isArray(value) ? value : undefined
+}
+
+const activityTime = (event: AgentRunEvent) => agentEventNumber(event, 'createdAtMs') ?? Date.now()
+
+const activityRunScope = (event: AgentRunEvent) =>
+  agentEventString(event, 'runId') ?? agentEventString(event, 'sessionId') ?? agentEventString(event, 'turnId') ?? 'live'
+
+const activityDetail = (event: AgentRunEvent, keys: string[]) => {
+  const details = keys.flatMap((key) => {
+    const value = event[key]
+    const preview = previewEventValue(value)
+
+    return preview ? [`${key}: ${preview}`] : []
+  })
+
+  return details.length > 0 ? details.join('\n') : undefined
+}
+
+const compactActivityPreview = (value: string | undefined, maxChars = 180) => {
+  if (!value) return undefined
+  const compact = value.replace(/\s+/g, ' ').trim()
+
+  return compact.length > maxChars ? `${compact.slice(0, maxChars - 1)}...` : compact
+}
+
+const getToolEventId = (event: AgentRunEvent) =>
+  agentEventString(event, 'toolUseId') ??
+  agentEventString(event, 'toolCallId') ??
+  agentEventString(event, 'callId') ??
+  agentEventString(event, 'id')
+
+const getToolEventName = (event: AgentRunEvent) =>
+  agentEventString(event, 'toolName') ??
+  agentEventString(event, 'tool') ??
+  agentEventString(event, 'name') ??
+  'tool'
+
+const getApprovalStatus = (event: AgentRunEvent): ActivityStatus => {
+  const decision = agentEventString(event, 'decision')
+  const approved = agentEventBoolean(event, 'approved')
+
+  if (decision === 'reject' || approved === false) return 'rejected'
+  return 'approved'
+}
+
+const normalizeActivityPart = (event: AgentRunEvent, sequence: number): ActivityPart | null => {
+  const type = getAgentRunEventType(event)
+  const createdAtMs = activityTime(event)
+  const scope = activityRunScope(event)
+  const fallbackId = `${scope}:${type ?? 'event'}:${sequence}`
+
+  if (type === 'turn_started') {
+    return {
+      id: `turn:${agentEventString(event, 'turnId') ?? scope}`,
+      kind: 'turn',
+      status: 'running',
+      title: 'Turn started',
+      summary: compactActivityPreview(agentEventString(event, 'promptPreview')) ?? 'The agent started this turn.',
+      startedAtMs: createdAtMs,
+    }
+  }
+
+  if (type === 'turn_completed') {
+    return {
+      id: `turn:${agentEventString(event, 'turnId') ?? scope}`,
+      kind: 'turn',
+      status: 'completed',
+      title: 'Turn completed',
+      summary: agentEventNumber(event, 'durationMs') !== undefined ? `${(agentEventNumber(event, 'durationMs')! / 1000).toFixed(1)}s` : 'The turn completed.',
+      completedAtMs: createdAtMs,
+      outputPreview: compactActivityPreview(agentEventString(event, 'finalTextPreview')),
+    }
+  }
+
+  if (type === 'turn_failed' || type === 'run_failed' || type === 'web_chat_failed' || type === 'web_goal_failed') {
+    return {
+      id: `error:${scope}:${sequence}`,
+      kind: 'error',
+      status: 'failed',
+      title: type === 'turn_failed' ? 'Turn failed' : 'Run failed',
+      summary: compactActivityPreview(agentEventString(event, 'message') ?? agentEventString(event, 'error')) ?? 'The run failed.',
+      detail: activityDetail(event, ['message', 'error', 'durationMs']),
+      completedAtMs: createdAtMs,
+    }
+  }
+
+  if (type === 'context_built') {
+    const retained = agentEventNumber(event, 'retainedMessageCount')
+    const source = agentEventNumber(event, 'sourceMessageCount')
+
+    return {
+      id: `context:${agentEventString(event, 'turnId') ?? scope}`,
+      kind: 'context',
+      status: 'completed',
+      title: 'Built context',
+      summary: retained !== undefined && source !== undefined ? `retained ${retained} / ${source}` : 'Context was prepared.',
+      detail: activityDetail(event, [
+        'sourceMessageCount',
+        'retainedMessageCount',
+        'droppedMessageCount',
+        'estimatedChars',
+        'maxContextChars',
+        'compactionSummaryIncluded',
+      ]),
+      completedAtMs: createdAtMs,
+    }
+  }
+
+  if (type === 'model_request_started') {
+    const provider = agentEventString(event, 'provider')
+    const model = agentEventString(event, 'model')
+    const round = agentEventNumber(event, 'round')
+
+    return {
+      id: `model:${scope}:${round ?? 'request'}`,
+      kind: 'model',
+      status: 'running',
+      title: 'Calling model',
+      summary: [provider, model].filter(Boolean).join(' · ') || 'Model request started.',
+      detail: activityDetail(event, ['provider', 'model', 'round', 'toolCount']),
+      startedAtMs: createdAtMs,
+    }
+  }
+
+  if (type === 'model_response_completed') {
+    const provider = agentEventString(event, 'provider')
+    const model = agentEventString(event, 'model')
+    const round = agentEventNumber(event, 'round')
+    const toolCalls = agentEventArray(event, 'toolCalls') ?? []
+
+    return {
+      id: `model:${scope}:${round ?? 'request'}`,
+      kind: 'model',
+      status: 'completed',
+      title: 'Model response completed',
+      summary: toolCalls.length > 0 ? `requested ${toolCalls.length} tool call(s)` : ([provider, model].filter(Boolean).join(' · ') || 'Model response completed.'),
+      detail: activityDetail(event, ['textPreview', 'toolCalls', 'usage']),
+      outputPreview: compactActivityPreview(agentEventString(event, 'textPreview')),
+      completedAtMs: createdAtMs,
+    }
+  }
+
+  if (type === 'tool_call_started') {
+    const toolCallId = getToolEventId(event)
+    const toolName = getToolEventName(event)
+
+    return {
+      id: `tool:${toolCallId ?? fallbackId}`,
+      kind: 'tool',
+      status: 'running',
+      title: `Running ${toolName}`,
+      summary: compactActivityPreview(previewEventValue(event.input)) ?? 'Tool call started.',
+      detail: activityDetail(event, ['toolName', 'safety', 'input']),
+      toolCallId,
+      inputPreview: compactActivityPreview(previewEventValue(event.input), 260),
+      startedAtMs: createdAtMs,
+    }
+  }
+
+  if (type === 'tool_result') {
+    const toolCallId = getToolEventId(event)
+    const toolName = getToolEventName(event)
+    const ok = agentEventBoolean(event, 'ok')
+
+    return {
+      id: `tool:${toolCallId ?? fallbackId}`,
+      kind: 'tool',
+      status: ok === false ? 'failed' : 'completed',
+      title: `${toolName} result`,
+      summary: compactActivityPreview(agentEventString(event, 'contentPreview')) ?? (ok === false ? 'Tool failed.' : 'Tool returned a result.'),
+      detail: activityDetail(event, ['contentPreview', 'metadata']),
+      toolCallId,
+      outputPreview: compactActivityPreview(agentEventString(event, 'contentPreview'), 260),
+      completedAtMs: createdAtMs,
+    }
+  }
+
+  if (type === 'tool_call_completed') {
+    const toolCallId = getToolEventId(event)
+    const toolName = getToolEventName(event)
+    const ok = agentEventBoolean(event, 'ok')
+    const durationMs = agentEventNumber(event, 'durationMs')
+
+    return {
+      id: `tool:${toolCallId ?? fallbackId}`,
+      kind: 'tool',
+      status: ok === false ? 'failed' : 'completed',
+      title: `${toolName} ${ok === false ? 'failed' : 'completed'}`,
+      summary: compactActivityPreview(agentEventString(event, 'contentPreview')) ?? (durationMs !== undefined ? `${(durationMs / 1000).toFixed(1)}s` : 'Tool call completed.'),
+      detail: activityDetail(event, ['contentPreview', 'metadata', 'durationMs']),
+      toolCallId,
+      outputPreview: compactActivityPreview(agentEventString(event, 'contentPreview'), 260),
+      completedAtMs: createdAtMs,
+    }
+  }
+
+  if (type === 'approval_pending' || type === 'approval_requested') {
+    const approval = normalizePendingApproval(event)
+    if (!approval) return null
+
+    return {
+      id: `approval:${approval.id}`,
+      kind: 'approval',
+      status: 'waiting_approval',
+      title: `Waiting for approval: ${approval.toolName}`,
+      summary: approval.reason ?? approval.safety ?? 'Approval is required before this action can continue.',
+      detail: [approval.inputPreview, approval.risk, approval.sandboxMode, approval.approvalPolicy].filter(Boolean).join('\n') || undefined,
+      approvalId: approval.id,
+      inputPreview: compactActivityPreview(approval.inputPreview, 260),
+      startedAtMs: approval.createdAtMs ?? createdAtMs,
+    }
+  }
+
+  if (type === 'approval_answered' || type === 'approval_completed') {
+    const approvalId = getApprovalEventId(event)
+    if (!approvalId) return null
+    const status = getApprovalStatus(event)
+
+    return {
+      id: `approval:${approvalId}`,
+      kind: 'approval',
+      status,
+      title: status === 'rejected' ? 'Approval rejected' : 'Approval approved',
+      summary: agentEventString(event, 'reason') ?? agentEventString(event, 'decision') ?? (status === 'rejected' ? 'The request was rejected.' : 'The request was approved.'),
+      detail: activityDetail(event, ['decision', 'reason', 'resolvedBy']),
+      approvalId,
+      completedAtMs: createdAtMs,
+    }
+  }
+
+  if (type === 'gui_action_started') {
+    const guiActionId = agentEventString(event, 'guiActionId') ?? agentEventString(event, 'id')
+
+    return {
+      id: `gui:${guiActionId ?? fallbackId}`,
+      kind: 'gui',
+      status: 'running',
+      title: 'GUI action started',
+      summary: agentEventString(event, 'action') ?? agentEventString(event, 'method') ?? 'The agent is operating the GUI.',
+      detail: activityDetail(event, ['action', 'target', 'text', 'keys', 'method']),
+      startedAtMs: createdAtMs,
+    }
+  }
+
+  if (type === 'gui_action_completed' || type === 'gui_action_failed') {
+    const guiActionId = agentEventString(event, 'guiActionId') ?? agentEventString(event, 'id')
+    const failed = type === 'gui_action_failed' || agentEventBoolean(event, 'ok') === false
+
+    return {
+      id: `gui:${guiActionId ?? fallbackId}`,
+      kind: 'gui',
+      status: failed ? 'failed' : 'completed',
+      title: failed ? 'GUI action failed' : 'GUI action completed',
+      summary: compactActivityPreview(agentEventString(event, 'message') ?? agentEventString(event, 'method')) ?? 'GUI action finished.',
+      detail: activityDetail(event, ['message', 'method', 'screenshotPath', 'fallbackUsed']),
+      outputPreview: compactActivityPreview(agentEventString(event, 'message'), 260),
+      completedAtMs: createdAtMs,
+    }
+  }
+
+  return null
+}
+
+const upsertActivityPart = (activities: ActivityPart[] | undefined, nextPart: ActivityPart): ActivityPart[] => {
+  const current = activities ?? []
+  const index = current.findIndex((part) => part.id === nextPart.id)
+
+  if (index < 0) return [...current, nextPart]
+
+  return current.map((part, partIndex) =>
+    partIndex === index
+      ? {
+          ...part,
+          ...nextPart,
+          startedAtMs: part.startedAtMs ?? nextPart.startedAtMs,
+          inputPreview: nextPart.inputPreview ?? part.inputPreview,
+          outputPreview: nextPart.outputPreview ?? part.outputPreview,
+          detail: nextPart.detail ?? part.detail,
+        }
+      : part,
+  )
+}
+
+const mergeActivityPart = (currentPart: ActivityPart, nextPart: ActivityPart): ActivityPart => ({
+  ...currentPart,
+  ...nextPart,
+  startedAtMs: currentPart.startedAtMs ?? nextPart.startedAtMs,
+  inputPreview: nextPart.inputPreview ?? currentPart.inputPreview,
+  outputPreview: nextPart.outputPreview ?? currentPart.outputPreview,
+  detail: nextPart.detail ?? currentPart.detail,
+})
+
+const appendAssistantTimelineText = (
+  timelineParts: AssistantTimelinePart[] | undefined,
+  nextText: string,
+): AssistantTimelinePart[] => {
+  if (!nextText) return timelineParts ?? []
+
+  const currentParts = timelineParts ?? []
+  const lastPart = currentParts[currentParts.length - 1]
+
+  if (lastPart?.type === 'text') {
+    return currentParts.map((part, index) =>
+      index === currentParts.length - 1 && part.type === 'text' ? { ...part, text: part.text + nextText } : part,
+    )
+  }
+
+  return [...currentParts, { id: `text:${currentParts.length}`, type: 'text', text: nextText }]
+}
+
+const replaceAssistantTimelineText = (
+  timelineParts: AssistantTimelinePart[] | undefined,
+  text: string,
+): AssistantTimelinePart[] => {
+  const activityParts = (timelineParts ?? []).filter((part) => part.type === 'activity')
+
+  return text && text !== assistantThinkingText
+    ? [...activityParts, { id: 'text:final', type: 'text', text }]
+    : activityParts
+}
+
+const timelineEndsAtTextBoundary = (timelineParts: AssistantTimelinePart[] | undefined): boolean => {
+  const lastPart = timelineParts?.[timelineParts.length - 1]
+  if (!lastPart || lastPart.type === 'activity') return true
+
+  const text = lastPart.text
+  if (!text.trim()) return false
+  if (/\n\s*$/.test(text)) return true
+
+  return /[。！？.!?]\s*$/.test(text)
+}
+
+const hasAssistantTimelineActivity = (
+  timelineParts: AssistantTimelinePart[] | undefined,
+  activityId: string,
+): boolean => (timelineParts ?? []).some((part) => part.type === 'activity' && part.activity.id === activityId)
+
+const upsertAssistantTimelineActivity = (
+  timelineParts: AssistantTimelinePart[] | undefined,
+  nextPart: ActivityPart,
+): AssistantTimelinePart[] => {
+  const currentParts = timelineParts ?? []
+  const index = currentParts.findIndex((part) => part.type === 'activity' && part.activity.id === nextPart.id)
+
+  if (index < 0) {
+    return [...currentParts, { id: `activity:${nextPart.id}`, type: 'activity', activity: nextPart }]
+  }
+
+  return currentParts.map((part, partIndex) =>
+    partIndex === index && part.type === 'activity'
+      ? { ...part, activity: mergeActivityPart(part.activity, nextPart) }
+      : part,
+  )
+}
+
+const createHistoricalTimelineParts = (text: string, activities: ActivityPart[]): AssistantTimelinePart[] => {
+  const activityParts = activities.map((activity) => ({
+    id: `activity:${activity.id}`,
+    type: 'activity' as const,
+    activity,
+  }))
+
+  return text ? [...activityParts, { id: 'text:historical', type: 'text', text }] : activityParts
+}
+
+const buildActivityGroupsFromEvents = (events: AgentRunEvent[]): ActivityPart[][] => {
+  const groups: ActivityPart[][] = []
+  let currentGroup: ActivityPart[] = []
+  let sequence = 0
+
+  for (const event of events) {
+    const type = getAgentRunEventType(event)
+    if (type === 'turn_started' && currentGroup.length > 0) {
+      groups.push(currentGroup)
+      currentGroup = []
+    }
+
+    sequence += 1
+    const activityPart = normalizeActivityPart(event, sequence)
+    if (activityPart) {
+      currentGroup = upsertActivityPart(currentGroup, activityPart)
+    }
+
+    if ((type === 'turn_completed' || type === 'turn_failed' || type === 'run_failed') && currentGroup.length > 0) {
+      groups.push(currentGroup)
+      currentGroup = []
+    }
+  }
+
+  if (currentGroup.length > 0) {
+    groups.push(currentGroup)
+  }
+
+  return groups
+}
+
+const attachActivityGroupsToMessages = (messages: ChatMessage[], events: AgentRunEvent[] | undefined): ChatMessage[] => {
+  if (!events?.length) return messages
+
+  const groups = buildActivityGroupsFromEvents(events)
+  if (!groups.length) return messages
+
+  const assistantIndexes = messages
+    .map((message, index) => (message.role === 'assistant' ? index : -1))
+    .filter((index) => index >= 0)
+  if (!assistantIndexes.length) return messages
+
+  const startIndex = Math.max(0, assistantIndexes.length - groups.length)
+  const groupByMessageIndex = new Map<number, ActivityPart[]>()
+  for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
+    const messageIndex = assistantIndexes[startIndex + groupIndex]
+    if (messageIndex === undefined) continue
+    groupByMessageIndex.set(messageIndex, groups[groupIndex]!)
+  }
+
+  return messages.map((message, index) => {
+    const activities = groupByMessageIndex.get(index)
+    return activities
+      ? { ...message, activities, timelineParts: createHistoricalTimelineParts(message.text, activities) }
+      : message
+  })
+}
+
+const approvalDecisionText = (decision: ApprovalDecision) => {
+  if (decision === 'approve_always') return '\u672c\u4f1a\u8bdd\u603b\u662f\u6279\u51c6'
+  if (decision === 'reject') return '\u62d2\u7edd'
+
+  return '\u6279\u51c6\u4e00\u6b21'
+}
+
+const approvalStatusText = (status: PendingApprovalStatus) => {
+  if (status === 'submitting') return '\u63d0\u4ea4\u4e2d'
+  if (status === 'approved') return '\u5df2\u6279\u51c6'
+  if (status === 'rejected') return '\u5df2\u62d2\u7edd'
+  if (status === 'failed') return '\u63d0\u4ea4\u5931\u8d25'
+
+  return '\u7b49\u5f85\u5ba1\u6279'
+}
+
+function PendingApprovalCard({
+  approval,
+  active,
+  onDecision,
+  stackIndex,
+  stackTotal,
+}: {
+  approval: PendingApprovalItem
+  active: boolean
+  onDecision: (approvalId: string, decision: ApprovalDecision) => void
+  stackIndex: number
+  stackTotal: number
+}) {
+  const locked =
+    !active || approval.status === 'submitting' || approval.status === 'approved' || approval.status === 'rejected'
+  const statusClass = approval.status === 'failed' ? 'failed' : approval.status === 'pending' ? 'pending' : 'settled'
+
+  return (
+    <motion.div
+      className={`approval-card approval-card-${approval.status} ${active ? 'active' : 'stacked'}`}
+      layout
+      style={{ zIndex: 20 - stackIndex }}
+      initial={{ opacity: 0, y: 16, scale: 0.985 }}
+      animate={{ opacity: active ? 1 : 0.72, y: active ? 0 : -12 * stackIndex, scale: active ? 1 : 1 - stackIndex * 0.018 }}
+      exit={{ opacity: 0, y: 10, scale: 0.985 }}
+      transition={{ duration: 0.18, ease: 'easeOut' }}
+    >
+      <div className="approval-card-glow" />
+      <div className="approval-card-header">
+        <div className="approval-card-icon" aria-hidden="true">
+          <ShieldCheck size={16} />
+        </div>
+        <div className="approval-card-title">
+          <strong>{'\u9700\u8981\u6279\u51c6'}</strong>
+          <span>{approval.toolName}</span>
+        </div>
+        {stackTotal > 1 ? <span className="approval-stack-count">{`${stackIndex + 1}/${stackTotal}`}</span> : null}
+        <span className={`approval-card-status ${statusClass}`}>{approvalStatusText(approval.status)}</span>
+      </div>
+
+      <div className="approval-card-body">
+        <p className="approval-card-reason">
+          {approval.reason ?? '\u5de5\u5177\u8c03\u7528\u6b63\u5728\u7b49\u5f85\u4f60\u7684\u51b3\u5b9a'}
+        </p>
+        <div className="approval-card-meta">
+          {approval.risk ? <span>{approval.risk}</span> : null}
+          {approval.safety ? <span>{approval.safety}</span> : null}
+          {approval.sandboxMode ? <span>{approval.sandboxMode}</span> : null}
+          {approval.approvalPolicy ? <span>{approval.approvalPolicy}</span> : null}
+        </div>
+        {approval.inputPreview ? (
+          <pre className="approval-card-input" aria-label={'\u8f93\u5165'}>
+            {approval.inputPreview}
+          </pre>
+        ) : null}
+        {approval.error ? <div className="approval-card-error">{approval.error}</div> : null}
+      </div>
+
+      <div className="approval-card-actions">
+        <button
+          className="approval-action subtle"
+          type="button"
+          disabled={locked}
+          onClick={() => onDecision(approval.id, 'approve_always')}
+        >
+          <ShieldCheck size={14} />
+          <span>{approvalDecisionText('approve_always')}</span>
+        </button>
+        <button
+          className="approval-action primary"
+          type="button"
+          disabled={locked}
+          onClick={() => onDecision(approval.id, 'approve_once')}
+        >
+          <Check size={14} />
+          <span>{approvalDecisionText('approve_once')}</span>
+        </button>
+        <button
+          className="approval-action danger"
+          type="button"
+          disabled={locked}
+          onClick={() => onDecision(approval.id, 'reject')}
+        >
+          <X size={14} />
+          <span>{approvalDecisionText('reject')}</span>
+        </button>
+      </div>
+    </motion.div>
+  )
+}
+
+function PendingApprovalStack({
+  approvals,
+  onDecision,
+}: {
+  approvals: PendingApprovalItem[]
+  onDecision: (approvalId: string, decision: ApprovalDecision) => void
+}) {
+  if (approvals.length === 0) {
+    return null
+  }
+
+  const orderedApprovals = [...approvals].sort(
+    (firstApproval, secondApproval) =>
+      (firstApproval.createdAtMs ?? Number.MAX_SAFE_INTEGER) -
+      (secondApproval.createdAtMs ?? Number.MAX_SAFE_INTEGER),
+  )
+  const visibleApprovals = orderedApprovals.slice(0, 4)
+
+  return (
+    <div className="approval-stack" aria-live="polite" aria-label={'\u7b49\u5f85\u5ba1\u6279'}>
+      <AnimatePresence initial={false}>
+        {visibleApprovals.map((approval, index) => (
+          <PendingApprovalCard
+            approval={approval}
+            active={index === 0}
+            onDecision={onDecision}
+            stackIndex={index}
+            stackTotal={orderedApprovals.length}
+            key={approval.id}
+          />
+        ))}
+      </AnimatePresence>
+    </div>
+  )
+}
+
 function AssistantMarkdown({ text }: { text: string }) {
   return (
     <div className="assistant-markdown">
@@ -1340,6 +2437,169 @@ function AssistantMarkdown({ text }: { text: string }) {
     </div>
   )
 }
+
+const activityStatusLabel = (status: ActivityStatus) => {
+  if (status === 'waiting_approval') return 'Waiting'
+  if (status === 'approved') return 'Approved'
+  if (status === 'rejected') return 'Rejected'
+  if (status === 'completed') return 'Completed'
+  if (status === 'failed') return 'Failed'
+  if (status === 'running') return 'Running'
+
+  return 'Pending'
+}
+
+function ActivityTimeline({ activities }: { activities?: ActivityPart[] }) {
+  const [openParts, setOpenParts] = useState<Record<string, boolean>>({})
+  const visibleActivities = (activities ?? []).filter(isVisibleActivityPart)
+
+  if (visibleActivities.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="activity-timeline" aria-label="Agent activity timeline">
+      {visibleActivities.map((activityPart) => {
+        const Icon = compactActivityIcon(activityPart)
+        const detailOpen = Boolean(openParts[activityPart.id])
+        const hasDetail = Boolean(
+          activityPart.detail || activityPart.inputPreview || activityPart.outputPreview || activityPart.toolCallId || activityPart.approvalId,
+        )
+
+        return (
+          <div className={`activity-step ${activityPart.status}`} key={activityPart.id}>
+            <button
+              className="activity-step-row"
+              type="button"
+              disabled={!hasDetail}
+              onClick={() => {
+                if (!hasDetail) return
+                setOpenParts((currentOpenParts) => ({
+                  ...currentOpenParts,
+                  [activityPart.id]: !currentOpenParts[activityPart.id],
+                }))
+              }}
+            >
+              <Icon size={13} />
+              <span className="activity-step-text">{activityStepLine(activityPart)}</span>
+              {hasDetail ? <ChevronDown size={12} className={detailOpen ? 'open' : ''} /> : null}
+            </button>
+            {detailOpen ? <ActivityDetailPanel activityPart={activityPart} /> : null}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+const isVisibleActivityPart = (activityPart: ActivityPart) =>
+  activityPart.kind !== 'model' && activityPart.kind !== 'context' && activityPart.kind !== 'turn'
+
+const compactActivityIcon = (activityPart: ActivityPart): IconType => {
+  if (activityPart.kind === 'approval') return ShieldCheck
+  if (activityPart.kind === 'gui') return MousePointer2
+  if (activityPart.kind === 'error') return AlertTriangle
+  return TerminalSquare
+}
+
+const activityStepLine = (activityPart: ActivityPart) => {
+  const subject = activitySubject(activityPart)
+  const preview = activityPart.kind === 'tool' || activityPart.kind === 'gui'
+    ? compactActivityPreview(activityPart.inputPreview ?? activityPart.outputPreview ?? activityPart.summary, 82)
+    : compactActivityPreview(activityPart.summary, 82)
+  const line = [activityVerb(activityPart), subject].filter(Boolean).join(' ')
+
+  return preview && preview !== subject ? `${line} - ${preview}` : line
+}
+
+const activityVerb = (activityPart: ActivityPart) => {
+  if (activityPart.kind === 'approval') {
+    if (activityPart.status === 'waiting_approval') return '\u7b49\u5f85\u5ba1\u6279'
+    if (activityPart.status === 'rejected') return '\u5df2\u62d2\u7edd'
+    return '\u5df2\u6279\u51c6'
+  }
+
+  if (activityPart.kind === 'error') return '\u8fd0\u884c\u5931\u8d25'
+  if (activityPart.status === 'running' || activityPart.status === 'pending') return '\u6b63\u5728\u8fd0\u884c'
+  if (activityPart.status === 'failed' || activityPart.status === 'rejected') return '\u8fd0\u884c\u5931\u8d25'
+
+  return '\u5df2\u8fd0\u884c'
+}
+
+const activitySubject = (activityPart: ActivityPart) => {
+  if (activityPart.kind === 'approval') {
+    return cleanActivityTitle(activityPart.title).replace(/^Waiting for approval:?\s*/i, '') || '\u5de5\u5177\u8bf7\u6c42'
+  }
+
+  if (activityPart.kind === 'error') {
+    return compactActivityPreview(activityPart.summary || activityPart.title, 80) ?? '\u4efb\u52a1'
+  }
+
+  const cleanTitle = cleanActivityTitle(activityPart.title)
+  const toolName = cleanTitle
+    .replace(/^Running\s+/i, '')
+    .replace(/\s+(result|completed|failed)$/i, '')
+    .trim()
+
+  return toolName || '\u5de5\u5177'
+}
+
+const cleanActivityTitle = (title: string) => title.replace(/[_-]+/g, ' ').trim()
+
+function ActivityDetailPanel({ activityPart }: { activityPart: ActivityPart }) {
+  return (
+    <div className="activity-detail-panel">
+      <div className="activity-detail-title">{activityPart.title}</div>
+      {activityPart.inputPreview ? (
+        <pre>
+          <code>{activityPart.inputPreview}</code>
+        </pre>
+      ) : null}
+      {activityPart.outputPreview ? (
+        <pre>
+          <code>{activityPart.outputPreview}</code>
+        </pre>
+      ) : null}
+      {activityPart.detail ? (
+        <pre>
+          <code>{activityPart.detail}</code>
+        </pre>
+      ) : null}
+      <div className={`activity-detail-result ${activityPart.status}`}>{activityStatusLabel(activityPart.status)}</div>
+    </div>
+  )
+}
+
+function AssistantTimelineContent({ message }: { message: ChatMessage }) {
+  const timelineParts = message.timelineParts ?? []
+  const hasTimelineParts = timelineParts.some((part) =>
+    part.type === 'text' ? part.text.length > 0 : isVisibleActivityPart(part.activity),
+  )
+
+  if (!hasTimelineParts) {
+    const visibleActivities = (message.activities ?? []).filter(isVisibleActivityPart)
+
+    return (
+      <>
+        {visibleActivities.length > 0 ? <ActivityTimeline activities={visibleActivities} /> : null}
+        <AssistantMarkdown text={message.text} />
+      </>
+    )
+  }
+
+  return (
+    <>
+      {timelineParts.map((part) =>
+        part.type === 'text' ? (
+          part.text ? <AssistantMarkdown key={part.id} text={part.text} /> : null
+        ) : (
+          <ActivityTimeline key={part.id} activities={[part.activity]} />
+        ),
+      )}
+    </>
+  )
+}
+
 function ChatTranscript({ messages }: { messages: ChatMessage[] }) {
   const [copiedMessageId, setCopiedMessageId] = useState<number | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
@@ -1404,7 +2664,7 @@ function ChatTranscript({ messages }: { messages: ChatMessage[] }) {
               transition={{ duration: 0.24 }}
             >
               <div className="assistant-reply">
-                <AssistantMarkdown text={message.text} />
+                <AssistantTimelineContent message={message} />
                 <div className="message-actions" aria-label="消息操作">
                   <button
                     className="message-action-button"
@@ -1429,16 +2689,120 @@ function ChatTranscript({ messages }: { messages: ChatMessage[] }) {
   )
 }
 
-function Composer({ onSend }: { onSend: (payload: ComposerSendPayload) => void }) {
+function GoalAttachmentCard({
+  goal,
+  draftText,
+  drafting,
+  onEdit,
+  onDelete,
+  onPauseToggle,
+  onContinueGoal,
+  busy,
+  error,
+}: {
+  goal: AttachedGoal | null
+  draftText: string
+  drafting: boolean
+  onEdit: () => void
+  onDelete: () => void
+  onPauseToggle: () => void
+  onContinueGoal: () => void
+  busy?: boolean
+  error?: string
+}) {
+  const summary = drafting ? draftText.trim() || '\u8f93\u5165\u76ee\u6807\u540e\u70b9\u51fb\u53d1\u9001' : goal?.text ?? ''
+  const paused = Boolean(goal?.paused)
+  const statusLabel = error
+    ? '\u76ee\u6807\u672a\u4fdd\u5b58'
+    : drafting
+      ? '\u65b0\u76ee\u6807'
+      : paused
+        ? '\u5df2\u6682\u505c\u76ee\u6807'
+        : '\u8fdb\u884c\u4e2d\u7684\u76ee\u6807'
+  const stateLabel = busy ? '\u6b63\u5728\u4fdd\u5b58' : error ? '\u4fdd\u5b58\u5931\u8d25' : drafting ? '\u6b63\u5728\u586b\u5199' : undefined
+
+  return (
+    <motion.div
+      className={'goal-attachment-card ' + (drafting ? 'drafting' : '') + ' ' + (paused ? 'paused' : '')}
+      initial={{ opacity: 0, y: 8, scale: 0.985 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 6, scale: 0.985 }}
+      transition={{ duration: 0.16, ease: 'easeOut' }}
+    >
+      <div className="goal-attachment-icon" aria-hidden="true">
+        <Target size={15} />
+      </div>
+      <div className="goal-attachment-copy">
+        <div className="goal-attachment-kicker">
+          <span className="goal-attachment-status">{statusLabel}</span>
+          <strong className="goal-attachment-text">{summary}</strong>
+          {stateLabel ? <span className="goal-attachment-state">{stateLabel}</span> : null}
+        </div>
+      </div>
+      <div className="goal-attachment-actions" aria-label="Goal actions">
+        {!drafting && goal ? (
+          <>
+            <button className="goal-icon-button" type="button" aria-label={'\u7f16\u8f91\u76ee\u6807'} title={'\u7f16\u8f91\u76ee\u6807'} onClick={onEdit}>
+              <Edit3 size={14} />
+            </button>
+            {!paused ? (
+              <button className="goal-icon-button primary" type="button" aria-label={'\u8fd0\u884c\u76ee\u6807'} title={'\u8fd0\u884c\u76ee\u6807'} onClick={onContinueGoal} disabled={busy}>
+                <RefreshCw size={14} />
+              </button>
+            ) : null}
+            <button
+              className={'goal-icon-button ' + (paused ? 'active' : '')}
+              type="button"
+              aria-label={paused ? '\u7ee7\u7eed\u76ee\u6807' : '\u6682\u505c\u76ee\u6807'}
+              title={paused ? '\u7ee7\u7eed\u76ee\u6807' : '\u6682\u505c\u76ee\u6807'}
+              onClick={onPauseToggle}
+            >
+              {paused ? <Play size={14} /> : <Pause size={14} />}
+            </button>
+          </>
+        ) : null}
+        <button className="goal-icon-button danger" type="button" aria-label={'\u5220\u9664\u76ee\u6807'} title={'\u5220\u9664\u76ee\u6807'} onClick={onDelete}>
+          <Trash2 size={14} />
+        </button>
+      </div>
+    </motion.div>
+  )
+}
+
+function Composer({
+  onSend,
+  goal,
+  onCreateGoal,
+  onToggleGoalPaused,
+  onContinueGoal,
+  onClearGoal,
+}: {
+  onSend: (payload: ComposerSendPayload) => void
+  goal: AttachedGoal | null
+  onCreateGoal: (objective: string) => Promise<boolean>
+  onToggleGoalPaused: () => Promise<void>
+  onContinueGoal: () => Promise<void>
+  onClearGoal: () => Promise<void>
+}) {
   const [attachOpen, setAttachOpen] = useState(false)
   const [approvalOpen, setApprovalOpen] = useState(false)
   const [approvalMode, setApprovalMode] = useState('请求批准')
   const [modelOpen, setModelOpen] = useState(false)
+  const [providerDialogOpen, setProviderDialogOpen] = useState(false)
+  const [modelManagerOpen, setModelManagerOpen] = useState(false)
   const [modelQuery, setModelQuery] = useState('')
   const [selectedModel, setSelectedModel] = useState(defaultModelLabel)
   const [availableModelGroups, setAvailableModelGroups] = useState<ModelGroup[]>(modelGroups)
+  const [visibleModelKeys, setVisibleModelKeys] = useState<Set<string> | null>(null)
   const [message, setMessage] = useState('')
-  const slashMenuState = getSlashMenuState(message)
+  const [goalCaptureActive, setGoalCaptureActive] = useState(false)
+  const [goalBusy, setGoalBusy] = useState(false)
+  const [goalError, setGoalError] = useState<string | undefined>()
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const folderInputRef = useRef<HTMLInputElement | null>(null)
+  const slashMenuState = goalCaptureActive ? null : getSlashMenuState(message)
+  const goalVisible = goalCaptureActive || Boolean(goal)
   const canSend = message.trim().length > 0
   const contextUsedK = 30
   const contextTotalK = 100
@@ -1446,6 +2810,19 @@ function Composer({ onSend }: { onSend: (payload: ComposerSendPayload) => void }
   const contextRemainingPercent = 100 - contextUsedPercent
   const contextMeterTone = contextUsedPercent >= 90 ? 'full' : contextUsedPercent >= 70 ? 'warning' : 'normal'
   const contextMeterStyle = { '--context-progress': `${contextUsedPercent}%` } as CSSProperties
+  const visibleModelGroups = availableModelGroups
+    .map((group) => ({
+      ...group,
+      models: group.models.filter((model) => {
+        if (!visibleModelKeys) {
+          return true
+        }
+
+        return visibleModelKeys.has(modelVisibilityKey(group.provider, model))
+      }),
+    }))
+    .filter((group) => group.models.length > 0)
+
   useEffect(() => {
     let active = true
 
@@ -1460,20 +2837,122 @@ function Composer({ onSend }: { onSend: (payload: ComposerSendPayload) => void }
     }
   }, [])
 
+  const focusComposerInput = () => {
+    window.requestAnimationFrame(() => composerInputRef.current?.focus())
+  }
+
+  const startGoalCapture = (seedText = '') => {
+    setMessage(seedText)
+    setGoalCaptureActive(true)
+    setGoalError(undefined)
+    setAttachOpen(false)
+    setModelOpen(false)
+    setApprovalOpen(false)
+    setProviderDialogOpen(false)
+    setModelManagerOpen(false)
+    focusComposerInput()
+  }
+
+  const deleteGoal = () => {
+    setGoalCaptureActive(false)
+    setGoalError(undefined)
+    setMessage('')
+    void onClearGoal().finally(focusComposerInput)
+  }
+
+  const toggleGoalPaused = () => {
+    void onToggleGoalPaused().finally(focusComposerInput)
+  }
+
+  const runGoal = () => {
+    void onContinueGoal().finally(focusComposerInput)
+  }
+
+  const isGoalSlashCommand = (value: string) => {
+    const command = value.trim().replace(/^\/+/, '').toLocaleLowerCase()
+    return command === 'goal' || command === '\u76ee\u6807'
+  }
+
   const updateMessage = (nextMessage: string) => {
     setMessage(nextMessage)
 
-    if (nextMessage.trimStart().startsWith("/")) {
+    if (!goalCaptureActive && nextMessage.trimStart().startsWith("/")) {
       setAttachOpen(false)
       setModelOpen(false)
       setApprovalOpen(false)
+      setProviderDialogOpen(false)
+      setModelManagerOpen(false)
     }
   }
 
-  const submitMessage = () => {
+  const selectSlashCommand = (item: SlashCommandItem) => {
+    if (item.id === 'goal') {
+      startGoalCapture('')
+    }
+  }
+
+  const openFilePicker = () => {
+    setAttachOpen(false)
+    setProviderDialogOpen(false)
+    setModelManagerOpen(false)
+    fileInputRef.current?.click()
+  }
+
+  const openFolderPicker = () => {
+    setAttachOpen(false)
+    setProviderDialogOpen(false)
+    setModelManagerOpen(false)
+    folderInputRef.current?.click()
+  }
+
+  const clearPickedFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    event.currentTarget.value = ''
+  }
+
+  const toggleVisibleModel = (provider: string, model: string) => {
+    const key = modelVisibilityKey(provider, model)
+
+    setVisibleModelKeys((currentKeys) => {
+      const nextKeys = new Set(currentKeys ?? modelVisibilityKeys(availableModelGroups))
+
+      if (nextKeys.has(key)) {
+        nextKeys.delete(key)
+        if (selectedModel === model) {
+          setSelectedModel(defaultModelLabel)
+        }
+      } else {
+        nextKeys.add(key)
+      }
+
+      return nextKeys
+    })
+  }
+
+  const submitMessage = async () => {
     const trimmedMessage = message.trim()
 
-    if (!trimmedMessage) {
+    if (!trimmedMessage || goalBusy) {
+      return
+    }
+
+    if (goalCaptureActive) {
+      setGoalBusy(true)
+      setGoalError(undefined)
+      const created = await onCreateGoal(trimmedMessage)
+      setGoalBusy(false)
+      if (!created) {
+        setGoalError('goal_save_failed')
+        focusComposerInput()
+        return
+      }
+      setGoalCaptureActive(false)
+      setMessage('')
+      focusComposerInput()
+      return
+    }
+
+    if (isGoalSlashCommand(trimmedMessage)) {
+      startGoalCapture('')
       return
     }
 
@@ -1481,26 +2960,99 @@ function Composer({ onSend }: { onSend: (payload: ComposerSendPayload) => void }
       message: trimmedMessage,
       approvalMode,
       modelId: selectedModel === defaultModelLabel ? undefined : selectedModel,
+      goalId: goal && !goal.paused ? goal.goalId : undefined,
     })
     setMessage('')
   }
 
   return (
-    <div className="composer-zone">
-      <AnimatePresence>{slashMenuState ? <SlashCommandMenu state={slashMenuState} /> : attachOpen ? <AttachMenu /> : null}</AnimatePresence>
+    <div className={'composer-zone ' + (goalVisible ? 'has-goal' : '')}>
+      <ProviderConnectDialog open={providerDialogOpen} onClose={() => setProviderDialogOpen(false)} />
+      <ModelManageDialog
+        open={modelManagerOpen}
+        modelGroups={availableModelGroups}
+        visibleModelKeys={visibleModelKeys}
+        onClose={() => setModelManagerOpen(false)}
+        onToggleModel={toggleVisibleModel}
+        onConnectProvider={() => {
+          setModelManagerOpen(false)
+          setProviderDialogOpen(true)
+        }}
+      />
+
+      <AnimatePresence>
+        {slashMenuState ? (
+          <SlashCommandMenu state={slashMenuState} onSelectCommand={selectSlashCommand} />
+        ) : attachOpen ? (
+          <AttachMenu
+            onSelectGoal={() => startGoalCapture('')}
+            onSelectFile={openFilePicker}
+            onSelectFolder={openFolderPicker}
+          />
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {goalVisible ? (
+          <GoalAttachmentCard
+            goal={goal}
+            draftText={message}
+            drafting={goalCaptureActive}
+            onEdit={() => startGoalCapture(goal?.text ?? '')}
+            onDelete={deleteGoal}
+            onPauseToggle={toggleGoalPaused}
+            onContinueGoal={runGoal}
+            busy={goalBusy}
+            error={goalError}
+          />
+        ) : null}
+      </AnimatePresence>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        aria-hidden="true"
+        tabIndex={-1}
+        onChange={clearPickedFiles}
+      />
+      <input
+        ref={(element) => {
+          folderInputRef.current = element
+          if (element) {
+            element.setAttribute('webkitdirectory', '')
+            element.setAttribute('directory', '')
+          }
+        }}
+        type="file"
+        multiple
+        hidden
+        aria-hidden="true"
+        tabIndex={-1}
+        onChange={clearPickedFiles}
+      />
 
       <div className="composer">
         <textarea
+          ref={composerInputRef}
           className="composer-input"
-          aria-label="消息输入"
-          placeholder="要求后续变更"
+          aria-label={goalCaptureActive ? '\u76ee\u6807\u8f93\u5165' : '\u6d88\u606f\u8f93\u5165'}
+          placeholder={goalCaptureActive ? '\u8f93\u5165\u76ee\u6807\uff0c\u7136\u540e\u53d1\u9001' : '\u8981\u6c42\u540e\u7eed\u53d8\u66f4'}
           value={message}
           onInput={(event) => updateMessage(event.currentTarget.value)}
           onChange={(event) => updateMessage(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault()
-              submitMessage()
+              const firstCommand = slashMenuState?.commands[0]
+
+              if (firstCommand?.id === 'goal') {
+                selectSlashCommand(firstCommand)
+                return
+              }
+
+              void submitMessage()
             }
           }}
         />
@@ -1517,6 +3069,8 @@ function Composer({ onSend }: { onSend: (payload: ComposerSendPayload) => void }
                 if (nextOpen) {
                   setApprovalOpen(false)
                   setModelOpen(false)
+                  setProviderDialogOpen(false)
+                  setModelManagerOpen(false)
                 }
 
                 return nextOpen
@@ -1537,6 +3091,8 @@ function Composer({ onSend }: { onSend: (payload: ComposerSendPayload) => void }
                   if (nextOpen) {
                     setAttachOpen(false)
                     setModelOpen(false)
+                    setProviderDialogOpen(false)
+                    setModelManagerOpen(false)
                   }
 
                   return nextOpen
@@ -1569,6 +3125,8 @@ function Composer({ onSend }: { onSend: (payload: ComposerSendPayload) => void }
                   if (nextOpen) {
                     setAttachOpen(false)
                     setApprovalOpen(false)
+                    setProviderDialogOpen(false)
+                    setModelManagerOpen(false)
                   }
 
                   return nextOpen
@@ -1584,12 +3142,23 @@ function Composer({ onSend }: { onSend: (payload: ComposerSendPayload) => void }
                 <ModelMenu
                   query={modelQuery}
                   selectedModel={selectedModel}
-                  modelGroups={availableModelGroups}
+                  modelGroups={visibleModelGroups}
                   onQueryChange={setModelQuery}
                   onSelectModel={(model) => {
                     setSelectedModel(model)
                     setModelQuery('')
                     setModelOpen(false)
+                  }}
+                  onAddModel={() => {
+                    setModelOpen(false)
+                    setModelQuery('')
+                    setProviderDialogOpen(true)
+                  }}
+                  onManageModels={() => {
+                    setModelOpen(false)
+                    setModelQuery('')
+                    setProviderDialogOpen(false)
+                    setModelManagerOpen(true)
                   }}
                 />
               ) : null}
@@ -1624,20 +3193,43 @@ function Composer({ onSend }: { onSend: (payload: ComposerSendPayload) => void }
 function MainChat({ activeChat }: { activeChat: ActiveChat }) {
   const [messagesByChat, setMessagesByChat] = useState<Record<string, ChatMessage[]>>({})
   const [conversationIdsByChat, setConversationIdsByChat] = useState<Record<string, string>>({})
+  const [attachedGoal, setAttachedGoal] = useState<AttachedGoal | null>(null)
+  const [pendingApprovals, setPendingApprovals] = useState<Record<string, PendingApprovalItem>>({})
   const [chatMenuOpen, setChatMenuOpen] = useState(false)
   const smoothWritersRef = useRef<Map<number, SmoothWriterState>>(new Map())
+  const activitySequenceRef = useRef(0)
   const activeConversationId = conversationIdsByChat[activeChat.id] ?? activeChat.conversationId
   const messages = messagesByChat[activeChat.id] ?? initialMessages
+  const visiblePendingApprovals = Object.values(pendingApprovals).filter(
+    (approval) => !approval.threadId || !activeConversationId || approval.threadId === activeConversationId,
+  )
+
+  useEffect(() => {
+    let active = true
+
+    void loadActiveGoal().then((goalSummary) => {
+      if (active) {
+        setAttachedGoal(goalSummary ? goalSummaryToAttachedGoal(goalSummary) : null)
+      }
+    })
+
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     let active = true
 
     if (activeConversationId) {
-      void loadConversationMessages(activeConversationId).then((loadedMessages) => {
+      void Promise.all([
+        loadConversationMessages(activeConversationId),
+        loadConversationEvents(activeConversationId),
+      ]).then(([loadedMessages, loadedEvents]) => {
         if (active && loadedMessages && loadedMessages.length > 0) {
           setMessagesByChat((currentMessagesByChat) => ({
             ...currentMessagesByChat,
-            [activeChat.id]: loadedMessages,
+            [activeChat.id]: attachActivityGroupsToMessages(loadedMessages, loadedEvents),
           }))
         }
       })
@@ -1658,14 +3250,92 @@ function MainChat({ activeChat }: { activeChat: ActiveChat }) {
     }
   }, [])
 
-  const updateAssistantMessage = (assistantId: number, nextText: string, append = false) => {
+  const flushPendingActivitiesIntoTimeline = (
+    assistantId: number,
+    timelineParts: AssistantTimelinePart[] | undefined,
+  ): AssistantTimelinePart[] => {
+    const writer = smoothWritersRef.current.get(assistantId)
+    if (!writer?.pendingActivities.length) return timelineParts ?? []
+
+    let nextTimelineParts = timelineParts ?? []
+    for (const activityPart of writer.pendingActivities) {
+      nextTimelineParts = upsertAssistantTimelineActivity(nextTimelineParts, activityPart)
+    }
+    writer.pendingActivities = []
+    return nextTimelineParts
+  }
+
+  const flushPendingAssistantActivities = (assistantId: number) => {
+    const writer = smoothWritersRef.current.get(assistantId)
+    if (!writer?.pendingActivities.length) return
+
     setMessagesByChat((currentMessagesByChat) => ({
       ...currentMessagesByChat,
       [activeChat.id]: (currentMessagesByChat[activeChat.id] ?? initialMessages).map((message) =>
         message.id === assistantId
-          ? { ...message, text: append ? (message.text === '...' ? '' : message.text) + nextText : nextText }
+          ? {
+              ...message,
+              timelineParts: flushPendingActivitiesIntoTimeline(assistantId, message.timelineParts),
+            }
           : message,
       ),
+    }))
+  }
+
+  const updateAssistantMessage = (assistantId: number, nextText: string, append = false) => {
+    setMessagesByChat((currentMessagesByChat) => ({
+      ...currentMessagesByChat,
+      [activeChat.id]: (currentMessagesByChat[activeChat.id] ?? initialMessages).map((message) => {
+        if (message.id !== assistantId) return message
+
+        const nextTimelineParts = append
+          ? appendAssistantTimelineText(message.timelineParts, nextText)
+          : replaceAssistantTimelineText(message.timelineParts, nextText)
+        const timelineParts =
+          !append || timelineEndsAtTextBoundary(nextTimelineParts)
+            ? flushPendingActivitiesIntoTimeline(assistantId, nextTimelineParts)
+            : nextTimelineParts
+
+        return {
+          ...message,
+          text: append ? (message.text === assistantThinkingText ? '' : message.text) + nextText : nextText,
+          timelineParts,
+        }
+      }),
+    }))
+  }
+
+  const updateAssistantActivity = (assistantId: number, event: AgentRunEvent) => {
+    activitySequenceRef.current += 1
+    const activityPart = normalizeActivityPart(event, activitySequenceRef.current)
+    if (!activityPart) return
+
+    setMessagesByChat((currentMessagesByChat) => ({
+      ...currentMessagesByChat,
+      [activeChat.id]: (currentMessagesByChat[activeChat.id] ?? initialMessages).map((message) => {
+        if (message.id !== assistantId) return message
+
+        const writer = smoothWritersRef.current.get(assistantId)
+        const shouldDeferActivity =
+          Boolean(writer) &&
+          !writer?.completed &&
+          !hasAssistantTimelineActivity(message.timelineParts, activityPart.id) &&
+          !timelineEndsAtTextBoundary(message.timelineParts)
+
+        if (shouldDeferActivity && writer) {
+          writer.pendingActivities = upsertActivityPart(writer.pendingActivities, activityPart)
+          return {
+            ...message,
+            activities: upsertActivityPart(message.activities, activityPart),
+          }
+        }
+
+        return {
+          ...message,
+          activities: upsertActivityPart(message.activities, activityPart),
+          timelineParts: upsertAssistantTimelineActivity(message.timelineParts, activityPart),
+        }
+      }),
     }))
   }
 
@@ -1682,7 +3352,10 @@ function MainChat({ activeChat }: { activeChat: ActiveChat }) {
 
     writer.timer = null
     if (!writer.queue) {
-      if (writer.completed) smoothWritersRef.current.delete(assistantId)
+      if (writer.completed) {
+        flushPendingAssistantActivities(assistantId)
+        smoothWritersRef.current.delete(assistantId)
+      }
       return
     }
 
@@ -1696,12 +3369,14 @@ function MainChat({ activeChat }: { activeChat: ActiveChat }) {
     }
 
     if (writer.completed) {
+      flushPendingAssistantActivities(assistantId)
       smoothWritersRef.current.delete(assistantId)
     }
   }
 
   const enqueueSmoothAssistantText = (assistantId: number, delta: string) => {
-    const writer = smoothWritersRef.current.get(assistantId) ?? { queue: '', timer: null, completed: false }
+    const writer =
+      smoothWritersRef.current.get(assistantId) ?? { queue: '', timer: null, completed: false, pendingActivities: [] }
     writer.queue += delta
     smoothWritersRef.current.set(assistantId, writer)
     scheduleSmoothWriter(assistantId)
@@ -1717,6 +3392,270 @@ function MainChat({ activeChat }: { activeChat: ActiveChat }) {
       writer.timer = null
     }
     scheduleSmoothWriter(assistantId)
+  }
+
+  const removeApprovalAfterDelay = (approvalId: string) => {
+    window.setTimeout(() => {
+      setPendingApprovals((currentApprovals) => {
+        const currentApproval = currentApprovals[approvalId]
+        if (!currentApproval || currentApproval.status === 'pending' || currentApproval.status === 'submitting') {
+          return currentApprovals
+        }
+
+        const nextApprovals = { ...currentApprovals }
+        delete nextApprovals[approvalId]
+        return nextApprovals
+      })
+    }, 1800)
+  }
+
+  const reconcilePendingApprovals = async (options: { clearSubmitting?: boolean; targetApprovalId?: string } = {}) => {
+    const pending = await loadPendingApprovals()
+    if (!pending) {
+      return false
+    }
+
+    const pendingIds = new Set(pending.map((approval) => approval.approvalId))
+    const targetCleared = Boolean(options.targetApprovalId && !pendingIds.has(options.targetApprovalId))
+
+    setPendingApprovals((currentApprovals) => {
+      let changed = false
+      const nextApprovals = { ...currentApprovals }
+
+      for (const [approvalId, approval] of Object.entries(currentApprovals)) {
+        if (pendingIds.has(approvalId)) {
+          continue
+        }
+
+        if (approval.status === 'failed' || (options.clearSubmitting && approval.status === 'submitting')) {
+          delete nextApprovals[approvalId]
+          changed = true
+        }
+      }
+
+      return changed ? nextApprovals : currentApprovals
+    })
+
+    return targetCleared
+  }
+
+  useEffect(() => {
+    let active = true
+
+    const syncApprovals = () => {
+      if (active) {
+        void reconcilePendingApprovals()
+      }
+    }
+
+    syncApprovals()
+    const intervalId = window.setInterval(syncApprovals, 3000)
+
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+    }
+  }, [activeConversationId])
+
+  const handleRunEvent = (event: AgentRunEvent, assistantId?: number) => {
+    if (assistantId !== undefined) {
+      updateAssistantActivity(assistantId, event)
+    }
+
+    const type = getAgentRunEventType(event)
+
+    if (type === 'approval_pending' || type === 'approval_requested') {
+      const approval = normalizePendingApproval(event)
+      if (!approval) {
+        return
+      }
+
+      setPendingApprovals((currentApprovals) => ({
+        ...currentApprovals,
+        [approval.id]: { ...currentApprovals[approval.id], ...approval, status: currentApprovals[approval.id]?.status ?? 'pending' },
+      }))
+      return
+    }
+
+    if (type === 'approval_answered' || type === 'approval_completed') {
+      const approvalId = getApprovalEventId(event)
+      if (!approvalId) {
+        return
+      }
+
+      const decision = agentEventString(event, 'decision')
+      const status: PendingApprovalStatus = decision === 'reject' ? 'rejected' : 'approved'
+
+      setPendingApprovals((currentApprovals) => {
+        const currentApproval = currentApprovals[approvalId]
+        if (!currentApproval) {
+          return currentApprovals
+        }
+
+        return {
+          ...currentApprovals,
+          [approvalId]: { ...currentApproval, status, error: undefined },
+        }
+      })
+      removeApprovalAfterDelay(approvalId)
+    }
+  }
+
+  const handleApprovalDecision = (approvalId: string, decision: ApprovalDecision) => {
+    setPendingApprovals((currentApprovals) => {
+      const currentApproval = currentApprovals[approvalId]
+      if (!currentApproval || currentApproval.status === 'submitting') {
+        return currentApprovals
+      }
+
+      return {
+        ...currentApprovals,
+        [approvalId]: { ...currentApproval, status: 'submitting', error: undefined },
+      }
+    })
+
+    void (async () => {
+      const result = await resolveApproval(approvalId, decision)
+      if (!result) {
+        const clearedByBackendState = await reconcilePendingApprovals({
+          clearSubmitting: true,
+          targetApprovalId: approvalId,
+        })
+        if (clearedByBackendState) {
+          return
+        }
+
+        setPendingApprovals((currentApprovals) => {
+          const currentApproval = currentApprovals[approvalId]
+          if (!currentApproval) {
+            return currentApprovals
+          }
+
+          return {
+            ...currentApprovals,
+            [approvalId]: { ...currentApproval, status: 'failed', error: '\u63d0\u4ea4\u5931\u8d25\uff0c\u53ef\u4ee5\u91cd\u8bd5' },
+          }
+        })
+        return
+      }
+
+      const status: PendingApprovalStatus = decision === 'reject' ? 'rejected' : 'approved'
+      setPendingApprovals((currentApprovals) => {
+        const currentApproval = currentApprovals[approvalId]
+        if (!currentApproval) {
+          return currentApprovals
+        }
+
+        return {
+          ...currentApprovals,
+          [approvalId]: { ...currentApproval, status, error: undefined },
+        }
+      })
+      removeApprovalAfterDelay(approvalId)
+    })()
+  }
+
+  const handleCreateGoal = async (objective: string) => {
+    const currentGoal = attachedGoal
+    if (currentGoal?.goalId && !currentGoal.paused) {
+      await updateGoalStatus(currentGoal.goalId, 'pause')
+    }
+
+    const summary = await createGoal({ objective, title: objective })
+    if (!summary) {
+      return false
+    }
+
+    setAttachedGoal(goalSummaryToAttachedGoal(summary))
+    return true
+  }
+
+  const handleToggleGoalPaused = async () => {
+    const currentGoal = attachedGoal
+    if (!currentGoal) {
+      return
+    }
+
+    if (!currentGoal.goalId) {
+      setAttachedGoal({ ...currentGoal, paused: !currentGoal.paused })
+      return
+    }
+
+    const summary = await updateGoalStatus(currentGoal.goalId, currentGoal.paused ? 'resume' : 'pause')
+    if (summary) {
+      setAttachedGoal(goalSummaryToAttachedGoal(summary))
+    }
+  }
+
+  const handleContinueGoal = async () => {
+    const currentGoal = attachedGoal
+    if (!currentGoal?.goalId || currentGoal.paused) {
+      return
+    }
+
+    const conversationId = await ensureConversationId()
+    if (!conversationId) {
+      return
+    }
+
+    const time = formatMessageTime()
+    const userId = Date.now()
+    const assistantId = userId + 1
+    const userText = `继续目标：${currentGoal.text}`
+
+    setMessagesByChat((currentMessagesByChat) => {
+      const currentMessages = currentMessagesByChat[activeChat.id] ?? initialMessages
+      return {
+        ...currentMessagesByChat,
+        [activeChat.id]: [
+          ...currentMessages,
+          { id: userId, role: 'user', text: userText, time },
+          { id: assistantId, role: 'assistant', text: assistantThinkingText, time, activities: [], timelineParts: [] },
+        ],
+      }
+    })
+
+    try {
+      const result = await continueGoal(currentGoal.goalId, { threadId: conversationId })
+      if (!result?.runId) {
+        updateAssistantMessage(assistantId, backendUnavailableReply)
+        return
+      }
+      if (result.summary) {
+        setAttachedGoal(goalSummaryToAttachedGoal(result.summary))
+      }
+
+      let sawDelta = false
+      streamRun(result.threadId ?? conversationId, result.runId, {
+        onDelta: (delta) => {
+          sawDelta = true
+          enqueueSmoothAssistantText(assistantId, delta)
+        },
+        onEvent: (event) => handleRunEvent(event, assistantId),
+        onDone: () => {
+          completeSmoothAssistantText(assistantId)
+          void loadActiveGoal().then((goalSummary) => {
+            setAttachedGoal(goalSummary ? goalSummaryToAttachedGoal(goalSummary) : null)
+          })
+        },
+        onError: () => {
+          completeSmoothAssistantText(assistantId)
+          if (!sawDelta) {
+            updateAssistantMessage(assistantId, backendUnavailableReply)
+          }
+        },
+      })
+    } catch {
+      updateAssistantMessage(assistantId, backendUnavailableReply)
+    }
+  }
+
+  const handleClearGoal = async () => {
+    const currentGoal = attachedGoal
+    if (currentGoal?.goalId && !currentGoal.paused) {
+      await updateGoalStatus(currentGoal.goalId, 'pause')
+    }
+    setAttachedGoal(null)
   }
 
   const ensureConversationId = async () => {
@@ -1748,7 +3687,7 @@ function MainChat({ activeChat }: { activeChat: ActiveChat }) {
         [activeChat.id]: [
           ...currentMessages,
           { id: userId, role: 'user', text: payload.message, time },
-          { id: assistantId, role: 'assistant', text: '...', time },
+          { id: assistantId, role: 'assistant', text: assistantThinkingText, time, activities: [], timelineParts: [] },
         ],
       }
     })
@@ -1767,6 +3706,7 @@ function MainChat({ activeChat }: { activeChat: ActiveChat }) {
           text: payload.message,
           approvalMode: payload.approvalMode,
           modelId: payload.modelId,
+          goalId: payload.goalId,
         })
 
         if (!result) {
@@ -1776,7 +3716,7 @@ function MainChat({ activeChat }: { activeChat: ActiveChat }) {
 
         const immediateText = result.assistantMessage?.text ?? result.finalText
 
-        if (immediateText) {
+        if (immediateText && !result.runId) {
           updateAssistantMessage(assistantId, immediateText)
         }
 
@@ -1794,13 +3734,17 @@ function MainChat({ activeChat }: { activeChat: ActiveChat }) {
             sawDelta = true
             enqueueSmoothAssistantText(assistantId, delta)
           },
+          onEvent: (event) => handleRunEvent(event, assistantId),
           onDone: () => {
             completeSmoothAssistantText(assistantId)
+            if (!sawDelta && immediateText) {
+              updateAssistantMessage(assistantId, immediateText)
+            }
           },
           onError: () => {
             completeSmoothAssistantText(assistantId)
-            if (!sawDelta && !immediateText) {
-              updateAssistantMessage(assistantId, backendUnavailableReply)
+            if (!sawDelta) {
+              updateAssistantMessage(assistantId, immediateText || backendUnavailableReply)
             }
           },
         })
@@ -1880,7 +3824,16 @@ function MainChat({ activeChat }: { activeChat: ActiveChat }) {
       <section className="chat-canvas" aria-label={`${activeChat.title}\u5185\u5bb9`}>
         <ChatTranscript messages={messages} />
 
-        <Composer onSend={handleSend} />
+        <PendingApprovalStack approvals={visiblePendingApprovals} onDecision={handleApprovalDecision} />
+
+        <Composer
+          onSend={handleSend}
+          goal={attachedGoal}
+          onCreateGoal={handleCreateGoal}
+          onToggleGoalPaused={handleToggleGoalPaused}
+          onContinueGoal={handleContinueGoal}
+          onClearGoal={handleClearGoal}
+        />
       </section>
     </main>
   )
@@ -2418,6 +4371,7 @@ function App() {
   const [rightWidthBeforeExpand, setRightWidthBeforeExpand] = useState(292)
   const [activeChat, setActiveChat] = useState<ActiveChat>(() => createSidebarActiveChat('\u4f1a\u8bdd A'))
   const [activeView, setActiveView] = useState<WorkspaceView>('chat')
+  const [activeSetting, setActiveSetting] = useState('mcp')
 
   const getMaxRightWidth = () => {
     const leftPaneWidth = leftCollapsed ? 74 : leftWidth
@@ -2510,16 +4464,18 @@ function App() {
         collapsed={leftCollapsed}
         activeChatId={activeChat.id}
         activeView={activeView}
+        activeSetting={activeSetting}
         onOpenChat={openChat}
         onOpenHeartbeat={() => setActiveView('heartbeat')}
         onOpenSettings={() => setActiveView('settings')}
         onCloseSettings={() => setActiveView('chat')}
         onOpenPlugins={() => setActiveView('plugins')}
+        onSettingChange={setActiveSetting}
         onToggle={() => setLeftCollapsed((value) => !value)}
       />
       <ResizeHandle disabled={leftCollapsed} label="Adjust left sidebar width" onPointerDown={startLeftResize} />
       {activeView === 'settings' ? (
-        <SettingsWorkspace />
+        <SettingsWorkspace activeSetting={activeSetting} />
       ) : activeView === 'plugins' ? (
         <PluginsWorkspace />
       ) : activeView === 'heartbeat' ? (

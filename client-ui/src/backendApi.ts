@@ -48,6 +48,7 @@ export type SendMessageInput = {
   text: string
   approvalMode?: string
   modelId?: string
+  goalId?: string
 }
 
 export type SendMessageResult = {
@@ -56,6 +57,41 @@ export type SendMessageResult = {
   userMessage?: UiChatMessage
   assistantMessage?: UiChatMessage
   finalText?: string
+}
+
+export type AgentRunEvent = Record<string, unknown>
+
+export type ApprovalDecision = 'approve_once' | 'approve_always' | 'reject'
+
+export type ApprovalDecisionResult = {
+  ok?: boolean
+  approvalId?: string
+  decision?: ApprovalDecision
+}
+
+export type PendingApprovalSummary = {
+  approvalId: string
+}
+
+export type ContinueGoalResult = {
+  ok?: boolean
+  runId?: string
+  threadId?: string
+  summary?: UiGoalSummary
+}
+
+export type UiGoalStatus = 'active' | 'paused' | 'blocked' | 'usage_limited' | 'budget_limited' | 'completed'
+
+export type UiGoalSummary = {
+  id: string
+  title: string
+  objective: string
+  status: UiGoalStatus
+  progressPercent: number
+  requirementCount: number
+  completedRequirementCount: number
+  blockerCount: number
+  updatedAtMs?: number
 }
 
 export type HeartbeatTaskInput = {
@@ -298,6 +334,51 @@ const normalizeConversation = (value: unknown): UiConversation | undefined => {
   return { id, name, pinned: Boolean(value.pinned) }
 }
 
+const normalizeGoalSummary = (value: unknown): UiGoalSummary | undefined => {
+  const data = unwrapData(value)
+  const source = isRecord(data)
+    ? isRecord(data.summary)
+      ? data.summary
+      : isRecord(data.goal)
+        ? data.goal
+        : data
+    : value
+
+  if (!isRecord(source)) {
+    return undefined
+  }
+
+  const metadata = isRecord(source.metadata) ? source.metadata : source
+  const id = asString(metadata.goalId) ?? asString(source.goalId) ?? asString(source.id)
+  const objective = asString(source.objective) ?? asString(metadata.objective) ?? asString(metadata.title)
+  const title = asString(metadata.title) ?? asString(source.title) ?? objective ?? id
+  const rawStatus = asString(metadata.status) ?? asString(source.status) ?? 'active'
+  const status: UiGoalStatus =
+    rawStatus === 'paused' ||
+    rawStatus === 'blocked' ||
+    rawStatus === 'usage_limited' ||
+    rawStatus === 'budget_limited' ||
+    rawStatus === 'completed'
+      ? rawStatus
+      : 'active'
+
+  if (!id || !title || !objective) {
+    return undefined
+  }
+
+  return {
+    id,
+    title,
+    objective,
+    status,
+    progressPercent: asNumber(metadata.progressPercent) ?? asNumber(source.progressPercent) ?? 0,
+    requirementCount: asNumber(source.requirementCount) ?? asNumber(metadata.requirementCount) ?? 0,
+    completedRequirementCount: asNumber(metadata.completedRequirementCount) ?? 0,
+    blockerCount: asNumber(metadata.blockerCount) ?? 0,
+    updatedAtMs: asNumber(metadata.updatedAtMs),
+  }
+}
+
 const normalizeProject = (value: unknown): UiProject | undefined => {
   if (!isRecord(value)) {
     return undefined
@@ -364,6 +445,55 @@ export async function loadWorkspaceSnapshot(): Promise<WorkspaceSnapshot | undef
   }
 
   return { chats: threads }
+}
+
+export async function loadActiveGoal(): Promise<UiGoalSummary | undefined> {
+  const response = await jsonRequest<unknown>('/api/goals/active')
+
+  return normalizeGoalSummary(response)
+}
+
+export async function createGoal(input: { objective: string; title?: string; requirements?: string[] }): Promise<UiGoalSummary | undefined> {
+  const response = await jsonRequest<unknown>('/api/goals', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
+
+  return normalizeGoalSummary(response)
+}
+
+export async function updateGoalStatus(
+  goalId: string,
+  action: 'resume' | 'pause' | 'continue' | 'block' | 'complete',
+  reason?: string,
+): Promise<UiGoalSummary | undefined> {
+  const response = await jsonRequest<unknown>(`/api/goals/${encodeURIComponent(goalId)}/${action}`, {
+    method: 'POST',
+    body: JSON.stringify(reason ? { reason } : {}),
+  })
+
+  return normalizeGoalSummary(response)
+}
+
+export async function continueGoal(goalId: string, input: { threadId?: string } = {}): Promise<ContinueGoalResult | undefined> {
+  const response = await jsonRequest<unknown>(`/api/goals/${encodeURIComponent(goalId)}/continue`, {
+    method: 'POST',
+    body: JSON.stringify({
+      threadId: input.threadId,
+      stream: true,
+    }),
+  })
+  const data = unwrapData(response)
+  if (!isRecord(data)) {
+    return undefined
+  }
+
+  return {
+    ok: data.ok === true,
+    runId: asString(data.runId),
+    threadId: asString(data.threadId),
+    summary: normalizeGoalSummary(data),
+  }
 }
 
 export async function loadModelGroups(): Promise<UiModelGroup[] | undefined> {
@@ -474,13 +604,28 @@ export async function loadConversationMessages(conversationId?: string): Promise
   return threadRows.length > 0 ? threadRows : undefined
 }
 
+export async function loadConversationEvents(conversationId?: string): Promise<AgentRunEvent[] | undefined> {
+  if (!conversationId) {
+    return undefined
+  }
+
+  const threadResponse = await jsonRequest<unknown>(`/api/threads/${encodeURIComponent(conversationId)}`)
+  const threadData = unwrapData(threadResponse)
+  const events = asArray(isRecord(threadData) ? threadData.events : undefined)
+    .filter((event): event is AgentRunEvent => isRecord(event))
+
+  return events.length > 0 ? events : undefined
+}
+
 export async function sendConversationMessage(input: SendMessageInput): Promise<SendMessageResult | undefined> {
+  const approvalFields = approvalRequestFields(input.approvalMode)
   const response = await jsonRequest<unknown>(`/api/conversations/${encodeURIComponent(input.conversationId)}/messages`, {
     method: 'POST',
     body: JSON.stringify({
       text: input.text,
-      approvalMode: input.approvalMode,
+      ...approvalFields,
       modelId: input.modelId,
+      goalId: input.goalId,
       stream: true,
     }),
   })
@@ -501,8 +646,9 @@ export async function sendConversationMessage(input: SendMessageInput): Promise<
     body: JSON.stringify({
       threadId: input.conversationId,
       prompt: input.text,
-      approvalMode: input.approvalMode,
+      ...approvalFields,
       modelId: input.modelId,
+      goalId: input.goalId,
       stream: true,
     }),
   })
@@ -519,11 +665,50 @@ export async function sendConversationMessage(input: SendMessageInput): Promise<
   }
 }
 
+function approvalRequestFields(approvalMode?: string) {
+  const mode = approvalMode?.trim()
+
+  switch (mode) {
+    case '替我审批':
+    case 'auto_review':
+    case 'auto-review':
+    case 'auto-approve':
+      return {
+        approvalMode: 'auto_review',
+        approvalPolicy: 'on-request',
+        approvalsReviewer: 'auto_review',
+        sandboxMode: 'workspace-write',
+      }
+    case '完全访问权限':
+    case 'full_access':
+    case 'full-access':
+    case 'danger-full-access':
+      return {
+        approvalMode: 'full_access',
+        approvalPolicy: 'never',
+        approvalsReviewer: 'user',
+        sandboxMode: 'danger-full-access',
+      }
+    case '请求批准':
+    case 'request_approval':
+    case 'request-approval':
+    case 'ask-for-approval':
+    default:
+      return {
+        approvalMode: 'request_approval',
+        approvalPolicy: 'on-request',
+        approvalsReviewer: 'user',
+        sandboxMode: 'workspace-write',
+      }
+  }
+}
+
 export function streamRun(
   threadId: string,
   runId: string | undefined,
   handlers: {
     onDelta: (delta: string) => void
+    onEvent?: (event: AgentRunEvent) => void
     onDone: () => void
     onError: (message?: string) => void
   },
@@ -546,7 +731,9 @@ export function streamRun(
         return true
       }
 
-      return asString(payload.sessionId) === runId || asString(payload.runId) === runId
+      const payloadRunId = asString(payload.sessionId) ?? asString(payload.runId)
+
+      return !payloadRunId || payloadRunId === runId
     }
 
     const handleMessage = (event: MessageEvent<string>) => {
@@ -564,15 +751,19 @@ export function streamRun(
         const type = asString(payload.type) ?? asString(payload.event)
         const delta = asString(payload.delta)
 
+        if (type && type !== 'agent_message_delta') {
+          handlers.onEvent?.(payload)
+        }
+
         if (type === 'agent_message_delta' && delta) {
           handlers.onDelta(delta)
         }
 
-        if (type && ['run_completed', 'turn_completed', 'web_chat_completed'].includes(type)) {
+        if (type && ['run_completed', 'turn_completed', 'web_chat_completed', 'web_goal_completed'].includes(type)) {
           closeDone()
         }
 
-        if (type && ['run_failed', 'turn_failed', 'web_chat_failed'].includes(type)) {
+        if (type && ['run_failed', 'turn_failed', 'web_chat_failed', 'web_goal_failed'].includes(type)) {
           closeError(asString(payload.error) ?? asString(payload.message))
         }
       } catch {
@@ -584,8 +775,12 @@ export function streamRun(
 
     source.onmessage = handleMessage
     source.addEventListener('agent_event', handleMessage as EventListener)
+    source.addEventListener('approval_pending', handleMessage as EventListener)
+    source.addEventListener('approval_answered', handleMessage as EventListener)
     source.addEventListener('web_chat_completed', handleMessage as EventListener)
     source.addEventListener('web_chat_failed', handleMessage as EventListener)
+    source.addEventListener('web_goal_completed', handleMessage as EventListener)
+    source.addEventListener('web_goal_failed', handleMessage as EventListener)
     source.onerror = () => {
       closeError()
     }
@@ -595,6 +790,51 @@ export function streamRun(
     handlers.onError()
     return () => {}
   }
+}
+
+export async function resolveApproval(
+  approvalId: string,
+  decision: ApprovalDecision,
+): Promise<ApprovalDecisionResult | undefined> {
+  const response = await jsonRequest<unknown>(`/api/approval/${encodeURIComponent(approvalId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ decision }),
+  })
+  const data = unwrapOkRecord(response)
+
+  if (!data) {
+    return undefined
+  }
+
+  return {
+    ok: data.ok === true,
+    approvalId: asString(data.approvalId) ?? approvalId,
+    decision: data.decision === 'approve_once' || data.decision === 'approve_always' || data.decision === 'reject'
+      ? data.decision
+      : decision,
+  }
+}
+
+export async function loadPendingApprovals(): Promise<PendingApprovalSummary[] | undefined> {
+  const response = await jsonRequest<unknown>('/api/mission-control/approvals')
+  const data = unwrapOkRecord(response)
+  const pending = isRecord(data?.data) ? data.data.pending : data?.pending
+
+  if (!Array.isArray(pending)) {
+    return undefined
+  }
+
+  return pending
+    .map((item): PendingApprovalSummary | undefined => {
+      if (!isRecord(item)) {
+        return undefined
+      }
+
+      const approvalId = asString(item.approvalId) ?? asString(item.id)
+
+      return approvalId ? { approvalId } : undefined
+    })
+    .filter((item): item is PendingApprovalSummary => Boolean(item))
 }
 
 const scheduleToText = (schedule: unknown): string => {
